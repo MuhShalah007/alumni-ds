@@ -1,3 +1,7 @@
+-- ⚠️ DEVELOPMENT SEED DATA ONLY — DO NOT RUN IN PRODUCTION
+-- This file creates demo admin accounts with weak passwords and test alumni records.
+-- Run with: wrangler d1 execute alumni-db --local --file=migrations/seed.sql
+-- NEVER run with: wrangler d1 execute alumni-db --file=migrations/seed.sql (no --local)
 -- Seed: Initial admin accounts + sample alumni
 -- CHANGE PASSWORD IMMEDIATELY after first login!
 

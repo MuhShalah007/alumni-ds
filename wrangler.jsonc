@@ -16,8 +16,8 @@
       "migrations_dir": "./migrations"
     }
   ],
+  // JWT_SECRET: set via 'wrangler secret put JWT_SECRET'
   "vars": {
-    "JWT_SECRET": "dev-secret-change-in-production-please-use-wrangler-secret",
     "APP_BASE_URL": "http://localhost:5173"
   },
   "r2_buckets": [

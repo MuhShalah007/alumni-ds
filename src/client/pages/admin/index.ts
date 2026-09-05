@@ -1,0 +1,8 @@
+export { LoginPage } from "./LoginPage";
+export { DashboardPage } from "./DashboardPage";
+export { AlumniListPage } from "./AlumniListPage";
+export { YearbookManagePage } from "./YearbookManagePage";
+export { ExcelPage } from "./ExcelPage";
+export { BroadcastPage } from "./BroadcastPage";
+export { AdminUsersPage } from "./AdminUsersPage";
+export { ActivityLogPage } from "./ActivityLogPage";

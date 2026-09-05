@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "alumni-ds",
+  "main": "./src/server/index.ts",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist/client/client",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "alumni-db",
+      "database_id": "local",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "vars": {
+    "JWT_SECRET": "dev-secret-change-in-production-please-use-wrangler-secret",
+    "APP_BASE_URL": "http://localhost:5173"
+  },
+  "r2_buckets": [
+    {
+      "binding": "PHOTOS",
+      "bucket_name": "alumni-photos"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "RATE_LIMIT",
+      "id": "local"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

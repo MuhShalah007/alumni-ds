@@ -1,0 +1,42 @@
+{
+  "name": "alumni-ds",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply alumni-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply alumni-db --remote",
+    "seed:local": "wrangler d1 execute alumni-db --local --file=./migrations/seed.sql",
+    "deploy": "vite build && wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/vite-plugin": "^1.0.0",
+    "drizzle-orm": "^0.36.0",
+    "hono": "^4.6.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.1.0",
+    "remixicon": "^4.9.1",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260905.1",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^26.4.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "drizzle-kit": "^0.28.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-pwa": "^0.21.0",
+    "wrangler": "^3.90.0"
+  }
+}

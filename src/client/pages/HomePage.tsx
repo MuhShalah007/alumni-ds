@@ -9,9 +9,7 @@ export function HomePage() {
         <div className="max-w-4xl mx-auto px-4 py-20 text-center">
           {/* Logo */}
           <div className="flex justify-center mb-8">
-            <div className="w-20 h-20 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center border border-white/20">
-              <Icon name="book-open-fill" size={40} className="text-white" />
-            </div>
+            <img src="/icons/favicon.svg" alt="Logo Buku Alumni Darusy Syahadah" className="w-20 h-20 rounded-2xl" />
           </div>
 
           <h1 className="text-4xl md:text-5xl font-bold mb-3 font-display tracking-tight">

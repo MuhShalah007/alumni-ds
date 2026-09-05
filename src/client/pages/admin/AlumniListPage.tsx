@@ -4,6 +4,7 @@ import { Icons } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
 import { apiFetch, ApiError } from "../../lib/api";
 import { PUTRA_UNITS, PUTRI_UNITS } from "@shared/constants";
+import { TableSkeleton } from "../../components/Skeleton";
 
 interface AlumniRow {
   id: string;
@@ -33,9 +34,12 @@ export function AlumniListPage() {
   const [pagination, setPagination] = useState<PaginationData>({ page: 1, limit: 50, total: 0, totalPages: 0 });
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ gender: "", angkatan: "", unit: "", status: "", search: "" });
+  const [sort, setSort] = useState({ column: "created_at", order: "desc" as "asc" | "desc" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detailAlumni, setDetailAlumni] = useState<Record<string, unknown> | null>(null);
   const [linkEditLoading, setLinkEditLoading] = useState(false);
+  const [editLink, setEditLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -47,6 +51,8 @@ export function AlumniListPage() {
     if (filters.unit) params.set("unit", filters.unit);
     if (filters.status) params.set("status", filters.status);
     if (filters.search) params.set("search", filters.search);
+    if (sort.column) params.set("sort", sort.column);
+    if (sort.order) params.set("order", sort.order);
 
     try {
       const res = await apiFetch<{ data: AlumniRow[]; pagination: PaginationData }>(`/admin/alumni?${params}`, { auth: true });
@@ -57,9 +63,10 @@ export function AlumniListPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.limit, filters]);
+  }, [pagination.page, pagination.limit, filters, sort]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { setPagination((p) => ({ ...p, page: 1 })); }, [sort]);
 
   const handleVerify = useCallback(async (id: string, status: "pending" | "verified" | "rejected") => {
     try {
@@ -97,14 +104,30 @@ export function AlumniListPage() {
         method: "POST",
         jsonBody: { expiryHours: 72, oneTime: true },
       });
-      await navigator.clipboard.writeText(res.link);
-      alert("Link edit disalin ke clipboard (berlaku 72 jam)");
+      setEditLink(res.link);
+      setLinkCopied(false);
     } catch (err) {
       alert(err instanceof ApiError ? err.message : "Gagal membuat link edit");
     } finally {
       setLinkEditLoading(false);
     }
   }, []);
+
+  const handleCopyLink = useCallback(async () => {
+    if (!editLink) return;
+    try {
+      await navigator.clipboard.writeText(editLink);
+    } catch {
+      // Fallback for non-HTTPS or older browsers
+      const input = document.getElementById("edit-link-input") as HTMLInputElement | null;
+      if (input) {
+        input.select();
+        document.execCommand("copy");
+      }
+    }
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  }, [editLink]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelected((prev) => {
@@ -123,6 +146,13 @@ export function AlumniListPage() {
   }, [selected, handleVerify]);
 
   const allUnits = [...PUTRA_UNITS, ...PUTRI_UNITS];
+
+  const SortHeader = ({ column, label }: { column: string; label: string }) => (
+    <th className="text-left px-4 py-3 font-medium text-slate-600 cursor-pointer select-none hover:bg-slate-100" onClick={() => setSort((s) => ({ column, order: s.column === column && s.order === "asc" ? "desc" : "asc" }))}>
+      {label}
+      {sort.column === column && <span className="ml-1">{sort.order === "asc" ? "↑" : "↓"}</span>}
+    </th>
+  );
 
   return (
     <div className="p-8">
@@ -170,7 +200,9 @@ export function AlumniListPage() {
       {/* Table */}
       <Card className="overflow-hidden">
         {loading ? (
-          <p className="p-8 text-center text-slate-500">Memuat data...</p>
+          <div className="p-4">
+            <TableSkeleton />
+          </div>
         ) : data.length === 0 ? (
           <p className="p-8 text-center text-slate-500">Belum ada data alumni.</p>
         ) : (
@@ -179,11 +211,11 @@ export function AlumniListPage() {
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="px-4 py-3 w-10"><input type="checkbox" onChange={(e) => setSelected(e.target.checked ? new Set(data.map((d) => d.id)) : new Set())} /></th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">Nama</th>
+                  <SortHeader column="nama_lengkap" label="Nama" />
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Jenis Kelamin</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">Unit/Angkatan</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">No HP</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">Status</th>
+                  <SortHeader column="unit" label="Unit/Angkatan" />
+                  <SortHeader column="no_hp" label="No HP" />
+                  <SortHeader column="status_verifikasi" label="Status" />
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Aksi</th>
                 </tr>
               </thead>
@@ -209,19 +241,27 @@ export function AlumniListPage() {
                       </Badge>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-1 items-center">
+                      <div className="flex gap-1.5 items-center flex-wrap">
                         <button onClick={() => handleViewDetail(row.id)} className="text-xs text-blue-600 hover:underline">Lihat</button>
                         {row.status_verifikasi === "pending" && (
                           <>
-                            <button onClick={() => handleVerify(row.id, "verified")} className="text-xs text-green-600 hover:underline" title="Verifikasi"><Icons.Check size={14} /></button>
-                            <button onClick={() => handleVerify(row.id, "rejected")} className="text-xs text-red-600 hover:underline" title="Tolak"><Icons.Close size={14} /></button>
+                            <button onClick={() => handleVerify(row.id, "verified")} className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 px-2 py-1 rounded" title="Verifikasi">
+                              <Icons.Check size={14} /> Verifikasi
+                            </button>
+                            <button onClick={() => handleVerify(row.id, "rejected")} className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded" title="Tolak">
+                              <Icons.Close size={14} /> Tolak
+                            </button>
                           </>
                         )}
                         {row.status_verifikasi === "verified" && (
-                          <button onClick={() => handleVerify(row.id, "pending")} className="text-xs text-yellow-600 hover:underline" title="Batal Verifikasi">Batal Verifikasi</button>
+                          <button onClick={() => handleVerify(row.id, "pending")} className="inline-flex items-center gap-1 text-xs font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 px-2 py-1 rounded" title="Batal Verifikasi">
+                            Batal Verifikasi
+                          </button>
                         )}
                         {row.status_verifikasi === "rejected" && (
-                          <button onClick={() => handleVerify(row.id, "verified")} className="text-xs text-green-600 hover:underline" title="Verifikasi"><Icons.Check size={14} /></button>
+                          <button onClick={() => handleVerify(row.id, "verified")} className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 px-2 py-1 rounded" title="Verifikasi">
+                            <Icons.Check size={14} /> Verifikasi
+                          </button>
                         )}
                         <button onClick={() => handleDelete(row.id)} className="text-xs text-red-600 hover:underline">Hapus</button>
                       </div>
@@ -329,7 +369,7 @@ export function AlumniListPage() {
               <div className="border-t border-slate-100 pt-3 grid grid-cols-2 gap-2 text-xs text-slate-400">
                 <div>Dibuat: {fmtDateTime(a.created_at)}</div>
                 <div>Update: {fmtDateTime(a.updated_at)}</div>
-                {a.verified_at ? <div>Verifikasi: {fmtDateTime(a.verified_at)}</div> : null}
+                {a.verified_at ? <div>Verifikasi: {fmtDateTime(a.verified_at)}{a.verified_by_name ? ` oleh ${a.verified_by_name}` : ""}</div> : null}
               </div>
 
               {/* Actions */}
@@ -344,6 +384,31 @@ export function AlumniListPage() {
             </div>
           );
         })()}
+      </Modal>
+
+      {/* Edit link modal */}
+      <Modal open={!!editLink} onClose={() => setEditLink(null)} title="Link Edit Alumni">
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Link edit berikut dapat dibagikan ke alumni untuk mengubah data mereka sendiri. Berlaku 72 jam dan hanya bisa digunakan sekali.
+          </p>
+          <div className="flex gap-2">
+            <input
+              id="edit-link-input"
+              type="text"
+              readOnly
+              value={editLink ?? ""}
+              onClick={(e) => (e.target as HTMLInputElement).select()}
+              className="flex-1 px-3 py-2 text-sm border border-[#E4E4E7] rounded-lg bg-slate-50 text-slate-700 font-mono outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <Button size="sm" onClick={handleCopyLink}>
+              {linkCopied ? <><Icons.Check size={14} /> Tersalin!</> : <><Icons.Copy size={14} /> Salin</>}
+            </Button>
+          </div>
+          <div className="flex justify-end">
+            <Button size="sm" variant="outline" onClick={() => setEditLink(null)}>Tutup</Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

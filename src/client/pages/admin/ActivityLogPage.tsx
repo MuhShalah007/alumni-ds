@@ -3,6 +3,7 @@ import { Button, Select, Card, Badge } from "../../components/ui";
 import { Icons } from "../../components/Icon";
 import { Pagination } from "../../components/Pagination";
 import { apiFetch } from "../../lib/api";
+import { TableSkeleton } from "../../components/Skeleton";
 
 interface ActivityLogRow {
   id: string;
@@ -186,7 +187,9 @@ export function ActivityLogPage() {
       {/* Table */}
       <Card className="overflow-hidden">
         {loading ? (
-          <p className="p-8 text-center text-slate-500">Memuat data...</p>
+          <div className="p-4">
+            <TableSkeleton />
+          </div>
         ) : data.length === 0 ? (
           <p className="p-8 text-center text-slate-500">Belum ada log aktivitas.</p>
         ) : (

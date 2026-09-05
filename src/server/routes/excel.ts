@@ -48,7 +48,7 @@ excelRoutes.get("/export/excel", async (c) => {
     namaLengkap: r.nama_lengkap,
     namaPondok: r.nama_pondok,
     panggilan: r.nama_panggilan,
-    gender: r.gender,
+    jenisKelamin: r.gender,
     unit: r.unit,
     kelasNihai: r.kelas_nihai,
     angkatan: r.angkatan,
@@ -86,16 +86,16 @@ excelRoutes.post("/import/excel", async (c) => {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     try {
-      const gender = String(row.gender || "").toLowerCase();
+      const gender = String(row.jenisKelamin || row.gender || "").toLowerCase();
       const unit = String(row.unit || "");
       const noHp = normalizePhone(String(row.noHp || ""));
 
       if (!gender || !["putra", "putri"].includes(gender)) {
-        results.errors.push(`Baris ${i + 1}: Gender tidak valid`);
+        results.errors.push(`Baris ${i + 1}: Jenis Kelamin tidak valid`);
         continue;
       }
       if (!unit || !isValidUnit(gender as "putra" | "putri", unit)) {
-        results.errors.push(`Baris ${i + 1}: Unit ${unit} tidak valid untuk gender ${gender}`);
+        results.errors.push(`Baris ${i + 1}: Unit ${unit} tidak valid untuk jenis kelamin ${gender}`);
         continue;
       }
       if (!noHp) {

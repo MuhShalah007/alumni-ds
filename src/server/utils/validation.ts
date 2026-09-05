@@ -23,6 +23,7 @@ export const submitAlumniSchema = z.object({
   kesanPesan: z.string().min(3, "Kesan & pesan wajib diisi").max(2000),
   momenBerkesan: z.string().min(3, "Momen berkesan wajib diisi").max(2000),
   fotoUrl: z.string().optional().nullable(),
+  backgroundUrl: z.string().optional().nullable(),
   sosialMedia: z
     .object({
       instagram: z.string().optional().nullable(),

@@ -167,7 +167,19 @@ alumniRoutes.get("/me", async (c) => {
   if (!row) return c.json({ error: "Alumni tidak ditemukan" }, 404);
 
   const { password_hash, edit_token, pin_code, ...safeData } = row as Record<string, unknown>;
-  return c.json({ alumni: { ...safeData, sosial_media: safeData.sosial_media ? JSON.parse(safeData.sosial_media as string) : null } });
+
+  // Include pending sensitive-field changes so the frontend can show "Menunggu persetujuan admin" badges
+  const pendingRows = await c.env.DB.prepare(
+    "SELECT field, new_value FROM pending_changes WHERE alumni_id = ? AND status = 'pending'",
+  )
+    .bind(payload.alumniId)
+    .all<{ field: string; new_value: string }>();
+  const pendingChanges = pendingRows.results.map((r) => ({ field: r.field, newValue: r.new_value }));
+
+  return c.json({
+    alumni: { ...safeData, sosial_media: safeData.sosial_media ? JSON.parse(safeData.sosial_media as string) : null },
+    pendingChanges,
+  });
 });
 
 // PUT /api/alumni/me — update own data (alumni JWT auth)
@@ -185,9 +197,20 @@ alumniRoutes.put("/me", async (c) => {
   }
   const data = parsed.data;
 
-  const existing = await c.env.DB.prepare("SELECT id, no_hp, gender FROM alumni WHERE id = ?")
+  // Sensitive fields require admin approval — stored in pending_changes, not applied directly
+  const SENSITIVE_SNAKE: Record<string, string> = {
+    tempatLahir: "tempat_lahir",
+    tanggalLahir: "tanggal_lahir",
+    gender: "gender",
+    angkatan: "angkatan",
+  };
+
+  // Read current values of sensitive fields for old_value capture
+  const existing = await c.env.DB.prepare(
+    "SELECT id, no_hp, gender, tempat_lahir, tanggal_lahir, angkatan FROM alumni WHERE id = ?",
+  )
     .bind(payload.alumniId)
-    .first<{ id: string; no_hp: string; gender: string }>();
+    .first<{ id: string; no_hp: string; gender: string; tempat_lahir: string; tanggal_lahir: string; angkatan: string }>();
   if (!existing) return c.json({ error: "Alumni tidak ditemukan" }, 404);
 
   let normalizedPhone: string | undefined;
@@ -209,12 +232,13 @@ alumniRoutes.put("/me", async (c) => {
   const updates: string[] = [];
   const values: (string | number | null)[] = [];
 
+  // Non-sensitive fields are applied directly to the alumni table
   const fieldMap: Record<string, string> = {
     namaLengkap: "nama_lengkap", namaPondok: "nama_pondok", namaPanggilan: "nama_panggilan",
-    tempatLahir: "tempat_lahir", tanggalLahir: "tanggal_lahir", gender: "gender", unit: "unit",
-    kelasNihai: "kelas_nihai", angkatan: "angkatan", tahunLulus: "tahun_lulus", tahunMasuk: "tahun_masuk",
+    unit: "unit", kelasNihai: "kelas_nihai", tahunLulus: "tahun_lulus", tahunMasuk: "tahun_masuk",
     namaAngkatan: "nama_angkatan", alamat: "alamat", email: "email", motto: "motto",
     kesanPesan: "kesan_pesan", momenBerkesan: "momen_berkesan", fotoUrl: "foto_url",
+    backgroundUrl: "background_url",
     statusAktivitas: "status_aktivitas", detailAktivitas: "detail_aktivitas",
     privacyLevel: "privacy_level", photoPrivacy: "photo_privacy", pinCode: "pin_code",
   };
@@ -233,25 +257,63 @@ alumniRoutes.put("/me", async (c) => {
     updates.push("sosial_media = ?");
     values.push(data.sosialMedia ? JSON.stringify(data.sosialMedia) : null);
   }
-  if (normalizedPhone) {
-    updates.push("no_hp = ?");
-    values.push(normalizedPhone);
-  }
   if (data.password) {
     const newHash = await hashPassword(data.password);
     updates.push("password_hash = ?");
     values.push(newHash);
   }
 
-  if (updates.length === 0) return c.json({ success: true, message: "Tidak ada perubahan" });
+  // Apply non-sensitive changes directly
+  if (updates.length > 0) {
+    updates.push("updated_at = CURRENT_TIMESTAMP");
+    values.push(existing.id);
+    await c.env.DB.prepare(`UPDATE alumni SET ${updates.join(", ")} WHERE id = ?`)
+      .bind(...values)
+      .run();
+  }
 
-  updates.push("updated_at = CURRENT_TIMESTAMP");
-  values.push(existing.id);
+  // Sensitive fields: create pending_changes entries instead of applying directly
+  const pendingFields: string[] = [];
+  const currentValues: Record<string, string> = {
+    tempat_lahir: existing.tempat_lahir,
+    tanggal_lahir: existing.tanggal_lahir,
+    gender: existing.gender,
+    angkatan: existing.angkatan,
+  };
 
-  await c.env.DB.prepare(`UPDATE alumni SET ${updates.join(", ")} WHERE id = ?`)
-    .bind(...values)
-    .run();
-  await logActivity(c.env.DB, null, existing.id, "ALUMNI_EDIT_SELF", { fields: Object.keys(data) });
+  for (const camel of Object.keys(SENSITIVE_SNAKE)) {
+    if (camel in data) {
+      const newVal = String((data as Record<string, unknown>)[camel] ?? "");
+      const snake = SENSITIVE_SNAKE[camel];
+      const oldVal = currentValues[snake] ?? "";
+      if (newVal !== oldVal) {
+        await c.env.DB.prepare(
+          "INSERT INTO pending_changes (id, alumni_id, field, old_value, new_value, status, proposed_by) VALUES (?, ?, ?, ?, ?, 'pending', 'self')",
+        )
+          .bind(ulid(), existing.id, snake, oldVal, newVal)
+          .run();
+        pendingFields.push(snake);
+      }
+    }
+  }
+
+  // noHp is sensitive — route to pending_changes instead of applying directly
+  if (normalizedPhone && normalizedPhone !== existing.no_hp) {
+    await c.env.DB.prepare(
+      "INSERT INTO pending_changes (id, alumni_id, field, old_value, new_value, status, proposed_by) VALUES (?, ?, ?, ?, ?, 'pending', 'self')",
+    )
+      .bind(ulid(), existing.id, "no_hp", existing.no_hp, normalizedPhone)
+      .run();
+    pendingFields.push("no_hp");
+  }
+
+  const hasChanges = updates.length > 0 || pendingFields.length > 0;
+  if (!hasChanges) return c.json({ success: true, message: "Tidak ada perubahan" });
+
+  await logActivity(c.env.DB, null, existing.id, "ALUMNI_EDIT_SELF", {
+    appliedFields: updates.map((u) => u.split(" =")[0]),
+    pendingFields,
+  });
 
   // Set status back to pending so admin can re-approve after alumni edits
   await c.env.DB.prepare("UPDATE alumni SET status_verifikasi = 'pending' WHERE id = ?")
@@ -263,38 +325,27 @@ alumniRoutes.put("/me", async (c) => {
     .bind(existing.id)
     .first<{ nama_lengkap: string; gender: string }>();
   if (alumniRow) {
-    const notifId = ulid();
     const targetRole = alumniRow.gender === "putra" ? "admin_putra" : "admin_putri";
+    const pesan = pendingFields.length > 0
+      ? `${alumniRow.nama_lengkap} mengubah biodata. Perubahan sensitif (${pendingFields.join(", ")}) perlu disetujui.`
+      : `${alumniRow.nama_lengkap} telah mengubah biodata sendiri dan perlu diapprove kembali.`;
     await c.env.DB.prepare(
       "INSERT INTO notifications (id, type, judul, pesan, target_role, target_gender, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
-      .bind(
-        notifId,
-        "system",
-        "Alumni Mengubah Data",
-        `${alumniRow.nama_lengkap} telah mengubah biodata sendiri dan perlu diapprove kembali.`,
-        targetRole,
-        alumniRow.gender,
-        null,
-      )
+      .bind(ulid(), "system", "Alumni Mengubah Data", pesan, targetRole, alumniRow.gender, null)
       .run();
     // Also notify super_admin
     await c.env.DB.prepare(
       "INSERT INTO notifications (id, type, judul, pesan, target_role, target_gender, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
-      .bind(
-        ulid(),
-        "system",
-        "Alumni Mengubah Data",
-        `${alumniRow.nama_lengkap} telah mengubah biodata sendiri dan perlu diapprove kembali.`,
-        "super_admin",
-        "all",
-        null,
-      )
+      .bind(ulid(), "system", "Alumni Mengubah Data", pesan, "super_admin", "all", null)
       .run();
   }
 
-  return c.json({ success: true, message: "Biodata berhasil diperbarui. Perubahan akan ditinjau oleh admin." });
+  const message = pendingFields.length > 0
+    ? "Biodata berhasil diperbarui. Beberapa perubahan menunggu persetujuan admin."
+    : "Biodata berhasil diperbarui. Perubahan akan ditinjau oleh admin.";
+  return c.json({ success: true, message, pendingFields });
 });
 
 // GET /api/alumni/by-token/:token — get alumni data for self-editing (with expiry + one-time check)
@@ -324,14 +375,46 @@ alumniRoutes.get("/by-token/:token", async (c) => {
   return c.json({ alumni: { ...safeData, sosial_media: safeData.sosial_media ? JSON.parse(safeData.sosial_media as string) : null } });
 });
 
+// POST /api/alumni/by-token/:token/exchange — exchange edit token for alumni JWT
+alumniRoutes.post("/by-token/:token/exchange", async (c) => {
+  const token = c.req.param("token");
+  const row = await c.env.DB.prepare(
+    "SELECT id, token_expires_at, token_used FROM alumni WHERE edit_token = ?",
+  )
+    .bind(token)
+    .first<{ id: string; token_expires_at: string | null; token_used: number }>();
+
+  if (!row) return c.json({ error: "Token tidak valid" }, 404);
+
+  // Check one-time use
+  if (row.token_used === 1) return c.json({ error: "Link edit sudah digunakan. Silakan login dengan nomor HP dan password Anda." }, 410);
+
+  // Check expiry
+  if (row.token_expires_at) {
+    const expiry = new Date(row.token_expires_at);
+    if (expiry < new Date()) return c.json({ error: "Link edit sudah kedaluwarsa. Silakan login atau minta link baru kepada admin." }, 410);
+  }
+
+  // Issue alumni JWT (valid for 24 hours) — does NOT mark token as used
+  const jwt = await signJwt<AlumniSession>(
+    { alumniId: row.id, type: "alumni" },
+    c.env.JWT_SECRET,
+    60 * 60 * 24,
+  );
+
+  return c.json({ token: jwt, alumniId: row.id });
+});
+
 // PUT /api/alumni/by-token/:token — update biodata by token (with expiry + one-time)
 alumniRoutes.put("/by-token/:token", async (c) => {
   const token = c.req.param("token");
   const body = await c.req.json();
 
-  const existing = await c.env.DB.prepare("SELECT id, no_hp, gender, token_expires_at, token_used FROM alumni WHERE edit_token = ?")
+  const existing = await c.env.DB.prepare(
+    "SELECT id, no_hp, gender, tempat_lahir, tanggal_lahir, angkatan, token_expires_at, token_used FROM alumni WHERE edit_token = ?",
+  )
     .bind(token)
-    .first<{ id: string; no_hp: string; gender: string; token_expires_at: string | null; token_used: number }>();
+    .first<{ id: string; no_hp: string; gender: string; tempat_lahir: string; tanggal_lahir: string; angkatan: string; token_expires_at: string | null; token_used: number }>();
   if (!existing) return c.json({ error: "Token tidak valid" }, 404);
 
   if (existing.token_used === 1) return c.json({ error: "Link edit sudah digunakan" }, 410);
@@ -360,15 +443,24 @@ alumniRoutes.put("/by-token/:token", async (c) => {
     return c.json({ error: "Unit tidak valid untuk gender tersebut" }, 400);
   }
 
+  // Sensitive fields require admin approval — stored in pending_changes, not applied directly
+  const SENSITIVE_SNAKE: Record<string, string> = {
+    tempatLahir: "tempat_lahir",
+    tanggalLahir: "tanggal_lahir",
+    gender: "gender",
+    angkatan: "angkatan",
+  };
+
   const updates: string[] = [];
   const values: (string | number | null)[] = [];
 
+  // Non-sensitive fields are applied directly to the alumni table
   const fieldMap: Record<string, string> = {
     namaLengkap: "nama_lengkap", namaPondok: "nama_pondok", namaPanggilan: "nama_panggilan",
-    tempatLahir: "tempat_lahir", tanggalLahir: "tanggal_lahir", gender: "gender", unit: "unit",
-    kelasNihai: "kelas_nihai", angkatan: "angkatan", tahunLulus: "tahun_lulus", tahunMasuk: "tahun_masuk",
+    unit: "unit", kelasNihai: "kelas_nihai", tahunLulus: "tahun_lulus", tahunMasuk: "tahun_masuk",
     namaAngkatan: "nama_angkatan", alamat: "alamat", email: "email", motto: "motto",
     kesanPesan: "kesan_pesan", momenBerkesan: "momen_berkesan", fotoUrl: "foto_url",
+    backgroundUrl: "background_url",
     statusAktivitas: "status_aktivitas", detailAktivitas: "detail_aktivitas",
     privacyLevel: "privacy_level", photoPrivacy: "photo_privacy", pinCode: "pin_code",
   };
@@ -387,16 +479,13 @@ alumniRoutes.put("/by-token/:token", async (c) => {
     updates.push("sosial_media = ?");
     values.push(data.sosialMedia ? JSON.stringify(data.sosialMedia) : null);
   }
-  if (normalizedPhone) {
-    updates.push("no_hp = ?");
-    values.push(normalizedPhone);
-  }
   if (data.password) {
     const newHash = await hashPassword(data.password);
     updates.push("password_hash = ?");
     values.push(newHash);
   }
 
+  // Apply non-sensitive changes directly
   if (updates.length > 0) {
     updates.push("updated_at = CURRENT_TIMESTAMP");
     values.push(existing.id);
@@ -405,21 +494,91 @@ alumniRoutes.put("/by-token/:token", async (c) => {
       .run();
   }
 
+  // Sensitive fields: create pending_changes entries instead of applying directly
+  const pendingFields: string[] = [];
+  const currentValues: Record<string, string> = {
+    tempat_lahir: existing.tempat_lahir,
+    tanggal_lahir: existing.tanggal_lahir,
+    gender: existing.gender,
+    angkatan: existing.angkatan,
+  };
+
+  for (const camel of Object.keys(SENSITIVE_SNAKE)) {
+    if (camel in data) {
+      const newVal = String((data as Record<string, unknown>)[camel] ?? "");
+      const snake = SENSITIVE_SNAKE[camel];
+      const oldVal = currentValues[snake] ?? "";
+      if (newVal !== oldVal) {
+        await c.env.DB.prepare(
+          "INSERT INTO pending_changes (id, alumni_id, field, old_value, new_value, status, proposed_by) VALUES (?, ?, ?, ?, ?, 'pending', 'token')",
+        )
+          .bind(ulid(), existing.id, snake, oldVal, newVal)
+          .run();
+        pendingFields.push(snake);
+      }
+    }
+  }
+
+  // noHp is sensitive — route to pending_changes instead of applying directly
+  if (normalizedPhone && normalizedPhone !== existing.no_hp) {
+    await c.env.DB.prepare(
+      "INSERT INTO pending_changes (id, alumni_id, field, old_value, new_value, status, proposed_by) VALUES (?, ?, ?, ?, ?, 'pending', 'token')",
+    )
+      .bind(ulid(), existing.id, "no_hp", existing.no_hp, normalizedPhone)
+      .run();
+    pendingFields.push("no_hp");
+  }
+
+  const hasChanges = updates.length > 0 || pendingFields.length > 0;
+
   // Mark token as used (one-time)
   await c.env.DB.prepare("UPDATE alumni SET token_used = 1 WHERE id = ?")
     .bind(existing.id)
     .run();
 
-  await logActivity(c.env.DB, null, existing.id, "ALUMNI_EDIT_TOKEN", { fields: Object.keys(data) });
+  await logActivity(c.env.DB, null, existing.id, "ALUMNI_EDIT_TOKEN", {
+    appliedFields: updates.map((u) => u.split(" =")[0]),
+    pendingFields,
+  });
 
-  return c.json({ success: true, message: "Biodata berhasil diperbarui" });
+  // Set status back to pending and notify admins (previously missing entirely)
+  if (hasChanges) {
+    await c.env.DB.prepare("UPDATE alumni SET status_verifikasi = 'pending' WHERE id = ?")
+      .bind(existing.id)
+      .run();
+
+    const alumniRow = await c.env.DB.prepare("SELECT nama_lengkap, gender FROM alumni WHERE id = ?")
+      .bind(existing.id)
+      .first<{ nama_lengkap: string; gender: string }>();
+    if (alumniRow) {
+      const targetRole = alumniRow.gender === "putra" ? "admin_putra" : "admin_putri";
+      const pesan = pendingFields.length > 0
+        ? `${alumniRow.nama_lengkap} mengubah biodata via token. Perubahan sensitif (${pendingFields.join(", ")}) perlu disetujui.`
+        : `${alumniRow.nama_lengkap} telah mengubah biodata via token dan perlu diapprove kembali.`;
+      await c.env.DB.prepare(
+        "INSERT INTO notifications (id, type, judul, pesan, target_role, target_gender, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(ulid(), "system", "Alumni Mengubah Data (Token)", pesan, targetRole, alumniRow.gender, null)
+        .run();
+      await c.env.DB.prepare(
+        "INSERT INTO notifications (id, type, judul, pesan, target_role, target_gender, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(ulid(), "system", "Alumni Mengubah Data (Token)", pesan, "super_admin", "all", null)
+        .run();
+    }
+  }
+
+  const message = pendingFields.length > 0
+    ? "Biodata berhasil diperbarui. Beberapa perubahan menunggu persetujuan admin."
+    : "Biodata berhasil diperbarui";
+  return c.json({ success: true, message, pendingFields });
 });
 
 // GET /api/alumni/profile/:id — public profile view with privacy masking
 alumniRoutes.get("/profile/:id", async (c) => {
   const id = c.req.param("id");
   const row = await c.env.DB.prepare(
-    "SELECT id, nama_lengkap, nama_panggilan, tempat_lahir, tanggal_lahir, gender, unit, kelas_nihai, angkatan, tahun_lulus, nama_angkatan, alamat, no_hp, email, motto, kesan_pesan, momen_berkesan, foto_url, sosial_media, status_aktivitas, detail_aktivitas, privacy_level, photo_privacy, status_verifikasi FROM alumni WHERE id = ?",
+    "SELECT id, nama_lengkap, nama_panggilan, tempat_lahir, tanggal_lahir, gender, unit, kelas_nihai, angkatan, tahun_lulus, nama_angkatan, alamat, no_hp, email, motto, kesan_pesan, momen_berkesan, foto_url, background_url, sosial_media, status_aktivitas, detail_aktivitas, privacy_level, photo_privacy, status_verifikasi FROM alumni WHERE id = ?",
   )
     .bind(id)
     .first();
@@ -435,11 +594,14 @@ alumniRoutes.get("/profile/:id", async (c) => {
       alumni: {
         id: row.id,
         nama_lengkap: row.nama_lengkap,
+        nama_panggilan: row.nama_panggilan,
+        gender: row.gender,
         angkatan: row.angkatan,
         tahun_lulus: row.tahun_lulus,
         privacy_level: "private",
         photo_privacy: photoPrivacy,
-        foto_url: null, // never show photo on private profile
+        foto_url: photoPrivacy === "public" ? row.foto_url : null,
+        background_url: row.background_url,
       },
     });
   }
@@ -456,7 +618,37 @@ alumniRoutes.get("/profile/:id", async (c) => {
   return c.json({ alumni: result });
 });
 
-// GET /api/alumni/yearbook — yearbook data for alumni (gender-scoped by own gender)
+// GET /api/alumni/angkatan-list — distinct angkatan & tahun_lulus values (gender-scoped by own gender)
+alumniRoutes.get("/angkatan-list", async (c) => {
+  const auth = c.req.header("Authorization");
+  if (!auth?.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = auth.slice(7);
+  const payload = await verifyJwt<AlumniSession>(token, c.env.JWT_SECRET).catch(() => null);
+  if (!payload || payload.type !== "alumni") return c.json({ error: "Unauthorized" }, 401);
+
+  const alumni = await c.env.DB.prepare("SELECT gender FROM alumni WHERE id = ?")
+    .bind(payload.alumniId)
+    .first<{ gender: string }>();
+  if (!alumni) return c.json({ error: "Alumni tidak ditemukan" }, 404);
+
+  const angkatanRows = await c.env.DB.prepare(
+    `SELECT DISTINCT angkatan FROM alumni WHERE status_verifikasi = 'verified' AND gender = ? AND angkatan IS NOT NULL AND angkatan != '' ORDER BY angkatan`,
+  )
+    .bind(alumni.gender)
+    .all<{ angkatan: string }>();
+  const tahunLulusRows = await c.env.DB.prepare(
+    `SELECT DISTINCT tahun_lulus FROM alumni WHERE status_verifikasi = 'verified' AND gender = ? AND tahun_lulus IS NOT NULL ORDER BY tahun_lulus`,
+  )
+    .bind(alumni.gender)
+    .all<{ tahun_lulus: number }>();
+
+  return c.json({
+    angkatan: angkatanRows.results.map((r) => r.angkatan),
+    tahunLulus: tahunLulusRows.results.map((r) => r.tahun_lulus),
+  });
+});
+
+// GET /api/alumni/yearbook — yearbook data for alumni (gender-scoped by own gender, server-side filtered)
 alumniRoutes.get("/yearbook", async (c) => {
   const auth = c.req.header("Authorization");
   if (!auth?.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
@@ -469,17 +661,48 @@ alumniRoutes.get("/yearbook", async (c) => {
     .first<{ gender: string }>();
   if (!alumni) return c.json({ error: "Alumni tidak ditemukan" }, 404);
 
+  const tahunLulus = c.req.query("tahunLulus");
+  const angkatan = c.req.query("angkatan");
+  const unit = c.req.query("unit");
+  const page = Math.max(parseInt(c.req.query("page") || "1", 10), 1);
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "50", 10), 1), 200);
+  const offset = (page - 1) * limit;
+
+  let whereSql = "WHERE status_verifikasi = 'verified' AND gender = ?";
+  const params: (string | number)[] = [alumni.gender];
+  if (tahunLulus) { whereSql += " AND tahun_lulus = ?"; params.push(tahunLulus); }
+  if (angkatan) { whereSql += " AND angkatan = ?"; params.push(angkatan); }
+  if (unit) { whereSql += " AND unit = ?"; params.push(unit); }
+
+  const countResult = await c.env.DB.prepare(`SELECT COUNT(*) as total FROM alumni ${whereSql}`)
+    .bind(...params)
+    .first<{ total: number }>();
+  const total = countResult?.total ?? 0;
+
   const rows = await c.env.DB.prepare(
-    `SELECT id, nama_lengkap, nama_panggilan, nama_pondok, gender, unit, kelas_nihai, angkatan, tahun_lulus, nama_angkatan, foto_url, motto, kesan_pesan, momen_berkesan, sosial_media, status_aktivitas, detail_aktivitas, tempat_lahir, tanggal_lahir
-     FROM alumni WHERE status_verifikasi != 'rejected' AND gender = ? ORDER BY angkatan, unit, kelas_nihai, nama_lengkap`,
+    `SELECT id, nama_lengkap, nama_panggilan, nama_pondok, gender, unit, kelas_nihai, angkatan, tahun_lulus, nama_angkatan, foto_url, motto, kesan_pesan, momen_berkesan, sosial_media, status_aktivitas, detail_aktivitas, tempat_lahir, tanggal_lahir, privacy_level, photo_privacy
+     FROM alumni ${whereSql} ORDER BY angkatan, unit, kelas_nihai, nama_lengkap LIMIT ? OFFSET ?`,
   )
-    .bind(alumni.gender)
+    .bind(...params, limit, offset)
     .all();
 
-  const data = rows.results.map((r: Record<string, unknown>) => ({
-    ...r,
-    sosial_media: r.sosial_media ? JSON.parse(r.sosial_media as string) : null,
-  }));
+  const data = rows.results.map((r: Record<string, unknown>) => {
+    const privacy = r.privacy_level as string;
+    const photoPrivacy = r.photo_privacy as string;
+    const isPrivate = privacy === "private";
+    return {
+      ...r,
+      sosial_media: isPrivate ? null : (r.sosial_media ? JSON.parse(r.sosial_media as string) : null),
+      motto: isPrivate ? null : r.motto,
+      kesan_pesan: isPrivate ? null : r.kesan_pesan,
+      momen_berkesan: isPrivate ? null : r.momen_berkesan,
+      status_aktivitas: isPrivate ? null : r.status_aktivitas,
+      detail_aktivitas: isPrivate ? null : r.detail_aktivitas,
+      tempat_lahir: isPrivate ? null : r.tempat_lahir,
+      tanggal_lahir: isPrivate ? null : r.tanggal_lahir,
+      foto_url: isPrivate && photoPrivacy === "private" ? null : r.foto_url,
+    };
+  });
 
-  return c.json({ data });
+  return c.json({ data, total, page, limit });
 });

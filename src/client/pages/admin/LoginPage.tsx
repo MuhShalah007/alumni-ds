@@ -20,6 +20,7 @@ export function LoginPage() {
     setError("");
     try {
       await login(username, password);
+      localStorage.removeItem("alumni_token");
       navigate("/admin/dashboard", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login gagal");
@@ -45,12 +46,6 @@ export function LoginPage() {
             {loading ? "Memuat..." : "Login"}
           </Button>
         </form>
-
-        <div className="text-xs text-[#A1A1AA] space-y-1 mt-4 p-3 bg-[#FAFAFA] rounded-lg border border-[#F4F4F5]">
-          <p className="font-semibold text-[#71717A] mb-1">Akun Test:</p>
-          <p>superadmin / admin123 (semua data)</p>
-          <p>adminputri / putri123 (data putri)</p>
-        </div>
       </Card>
     </div>
   );

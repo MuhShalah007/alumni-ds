@@ -34,6 +34,8 @@ adminRoutes.get("/alumni", async (c) => {
   const unit = c.req.query("unit");
   const status = c.req.query("status");
   const search = c.req.query("search");
+  const sort = c.req.query("sort") || "created_at";
+  const order = c.req.query("order") || "desc";
 
   // Build WHERE clause using raw D1 with scope from alumniScope
   let whereSql = "WHERE 1=1";
@@ -63,7 +65,9 @@ adminRoutes.get("/alumni", async (c) => {
     whereSql += " AND (nama_lengkap LIKE ? OR nama_panggilan LIKE ?)";
     d1Params.push(`%${search}%`, `%${search}%`);
   }
-
+  const allowedSortColumns = ["created_at", "nama_lengkap", "angkatan", "tahun_lulus", "unit", "status_verifikasi", "no_hp"];
+  const sortColumn = allowedSortColumns.includes(sort) ? sort : "created_at";
+  const sortOrder = order === "asc" ? "ASC" : "DESC";
   // Count total
   const countResult = await c.env.DB.prepare(`SELECT COUNT(*) as total FROM alumni ${whereSql}`)
     .bind(...d1Params)
@@ -72,7 +76,7 @@ adminRoutes.get("/alumni", async (c) => {
 
   // Fetch page
   const rows = await c.env.DB.prepare(
-    `SELECT id, nama_lengkap, nama_panggilan, gender, unit, kelas_nihai, angkatan, tahun_lulus, no_hp, status_verifikasi, privacy_level, foto_url, created_at FROM alumni ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    `SELECT id, nama_lengkap, nama_panggilan, gender, unit, kelas_nihai, angkatan, tahun_lulus, no_hp, status_verifikasi, privacy_level, foto_url, created_at FROM alumni ${whereSql} ORDER BY ${sortColumn} ${sortOrder} LIMIT ? OFFSET ?`,
   )
     .bind(...d1Params, limit, offset)
     .all();
@@ -92,7 +96,9 @@ adminRoutes.get("/alumni/:id", async (c) => {
   const accessCheck = await fetchScopedAlumni(c.env.DB, session, id);
   if (!accessCheck) return c.json({ error: "Alumni tidak ditemukan atau di luar scope" }, 404);
 
-  const row = await c.env.DB.prepare("SELECT id, nama_lengkap, nama_pondok, nama_panggilan, tempat_lahir, tanggal_lahir, gender, unit, kelas_nihai, angkatan, tahun_lulus, tahun_masuk, nama_angkatan, alamat, no_hp, email, motto, kesan_pesan, momen_berkesan, foto_url, sosial_media, status_aktivitas, detail_aktivitas, privacy_level, photo_privacy, status_verifikasi, verified_by, verified_at, created_at, updated_at FROM alumni WHERE id = ?")
+  const row = await c.env.DB.prepare(
+    "SELECT a.id, a.nama_lengkap, a.nama_pondok, a.nama_panggilan, a.tempat_lahir, a.tanggal_lahir, a.gender, a.unit, a.kelas_nihai, a.angkatan, a.tahun_lulus, a.tahun_masuk, a.nama_angkatan, a.alamat, a.no_hp, a.email, a.motto, a.kesan_pesan, a.momen_berkesan, a.foto_url, a.background_url, a.sosial_media, a.status_aktivitas, a.detail_aktivitas, a.privacy_level, a.photo_privacy, a.status_verifikasi, a.verified_by, a.verified_at, a.created_at, a.updated_at, adm.nama_lengkap as verified_by_name FROM alumni a LEFT JOIN admins adm ON a.verified_by = adm.id WHERE a.id = ?"
+  )
     .bind(id)
     .first();
 
@@ -136,6 +142,7 @@ adminRoutes.put("/alumni/:id", async (c) => {
     kesanPesan: "kesan_pesan",
     momenBerkesan: "momen_berkesan",
     fotoUrl: "foto_url",
+    backgroundUrl: "background_url",
     statusAktivitas: "status_aktivitas",
     detailAktivitas: "detail_aktivitas",
     privacyLevel: "privacy_level",
@@ -199,18 +206,29 @@ adminRoutes.delete("/alumni/:id", async (c) => {
 adminRoutes.patch("/alumni/:id/verify", async (c) => {
   const id = c.req.param("id");
   const session = c.get("admin")!;
-  const { status } = await c.req.json<{ status: "verified" | "rejected" }>();
+  const { status } = await c.req.json<{ status: "verified" | "rejected" | "pending" }>();
 
-  if (!["verified", "rejected"].includes(status)) {
-    return c.json({ error: "Status harus 'verified' atau 'rejected'" }, 400);
+  if (!["verified", "rejected", "pending"].includes(status)) {
+    return c.json({ error: "Status harus 'verified', 'rejected', atau 'pending'" }, 400);
   }
 
   const accessCheck = await fetchScopedAlumni(c.env.DB, session, id);
   if (!accessCheck) return c.json({ error: "Alumni di luar scope Anda" }, 403);
 
-  await c.env.DB.prepare("UPDATE alumni SET status_verifikasi = ?, verified_by = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-    .bind(status, session.adminId, id)
-    .run();
+  // For 'pending' (Batal Verifikasi), clear verified_by/verified_at
+  if (status === "pending") {
+    await c.env.DB.prepare(
+      "UPDATE alumni SET status_verifikasi = 'pending', verified_by = NULL, verified_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    )
+      .bind(id)
+      .run();
+  } else {
+    await c.env.DB.prepare(
+      "UPDATE alumni SET status_verifikasi = ?, verified_by = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    )
+      .bind(status, session.adminId, id)
+      .run();
+  }
 
   await c.env.DB.prepare("INSERT INTO activity_logs (id, admin_id, action, details) VALUES (?, ?, ?, ?)")
     .bind(ulid(), session.adminId, "VERIFY_ALUMNI", JSON.stringify({ alumniId: id, status }))
@@ -270,8 +288,11 @@ adminRoutes.get("/yearbook-data", async (c) => {
   const unit = c.req.query("unit");
   const gender = c.req.query("gender");
   const kelasNihai = c.req.query("kelasNihai");
+  const page = Math.max(parseInt(c.req.query("page") || "1", 10), 1);
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "50", 10), 1), 200);
+  const offset = (page - 1) * limit;
 
-  let whereSql = "WHERE status_verifikasi != 'rejected'";
+  let whereSql = "WHERE status_verifikasi = 'verified'";
   const params: (string | number)[] = [];
 
   if (session.role === "admin_putra") {
@@ -289,18 +310,68 @@ adminRoutes.get("/yearbook-data", async (c) => {
   if (gender) { whereSql += " AND gender = ?"; params.push(gender); }
   if (kelasNihai) { whereSql += " AND kelas_nihai = ?"; params.push(kelasNihai); }
 
-  const rows = await c.env.DB.prepare(
-    `SELECT id, nama_lengkap, nama_panggilan, nama_pondok, gender, unit, kelas_nihai, angkatan, tahun_lulus, nama_angkatan, foto_url, motto, kesan_pesan, momen_berkesan, sosial_media, status_aktivitas, detail_aktivitas, tempat_lahir, tanggal_lahir FROM alumni ${whereSql} ORDER BY angkatan, unit, kelas_nihai, nama_lengkap`,
-  )
+  const countResult = await c.env.DB.prepare(`SELECT COUNT(*) as total FROM alumni ${whereSql}`)
     .bind(...params)
+    .first<{ total: number }>();
+  const total = countResult?.total ?? 0;
+
+  const rows = await c.env.DB.prepare(
+    `SELECT id, nama_lengkap, nama_panggilan, nama_pondok, gender, unit, kelas_nihai, angkatan, tahun_lulus, nama_angkatan, foto_url, background_url, motto, kesan_pesan, momen_berkesan, sosial_media, status_aktivitas, detail_aktivitas, tempat_lahir, tanggal_lahir, privacy_level, photo_privacy FROM alumni ${whereSql} ORDER BY angkatan, unit, kelas_nihai, nama_lengkap LIMIT ? OFFSET ?`,
+  )
+    .bind(...params, limit, offset)
     .all();
 
-  const data = rows.results.map((r: Record<string, unknown>) => ({
-    ...r,
-    sosial_media: r.sosial_media ? JSON.parse(r.sosial_media as string) : null,
-  }));
+  const data = rows.results.map((r: Record<string, unknown>) => {
+    const privacy = r.privacy_level as string;
+    const photoPrivacy = r.photo_privacy as string;
+    const isPrivate = privacy === "private";
+    return {
+      ...r,
+      sosial_media: isPrivate ? null : (r.sosial_media ? JSON.parse(r.sosial_media as string) : null),
+      motto: isPrivate ? null : r.motto,
+      kesan_pesan: isPrivate ? null : r.kesan_pesan,
+      momen_berkesan: isPrivate ? null : r.momen_berkesan,
+      status_aktivitas: isPrivate ? null : r.status_aktivitas,
+      detail_aktivitas: isPrivate ? null : r.detail_aktivitas,
+      tempat_lahir: isPrivate ? null : r.tempat_lahir,
+      tanggal_lahir: isPrivate ? null : r.tanggal_lahir,
+      foto_url: isPrivate && photoPrivacy === "private" ? null : r.foto_url,
+    };
+  });
 
-  return c.json({ data });
+  return c.json({ data, total, page, limit });
+});
+
+// GET /api/admin/angkatan-list — distinct angkatan & tahun_lulus values (gender-scoped by admin role)
+adminRoutes.get("/angkatan-list", async (c) => {
+  const session = c.get("admin")!;
+
+  let whereSql = "WHERE status_verifikasi = 'verified'";
+  const params: (string | number)[] = [];
+  if (session.role === "admin_putra") {
+    whereSql += " AND gender = 'putra'";
+  } else if (session.role === "admin_putri") {
+    whereSql += " AND gender = 'putri'";
+  } else if (session.role === "admin_unit") {
+    whereSql += " AND gender = ? AND unit = ?";
+    params.push(session.assignedGender === "all" ? "putra" : session.assignedGender, session.assignedUnit ?? "");
+  }
+
+  const angkatanRows = await c.env.DB.prepare(
+    `SELECT DISTINCT angkatan FROM alumni ${whereSql} AND angkatan IS NOT NULL AND angkatan != '' ORDER BY angkatan`,
+  )
+    .bind(...params)
+    .all<{ angkatan: string }>();
+  const tahunLulusRows = await c.env.DB.prepare(
+    `SELECT DISTINCT tahun_lulus FROM alumni ${whereSql} AND tahun_lulus IS NOT NULL ORDER BY tahun_lulus`,
+  )
+    .bind(...params)
+    .all<{ tahun_lulus: number }>();
+
+  return c.json({
+    angkatan: angkatanRows.results.map((r) => r.angkatan),
+    tahunLulus: tahunLulusRows.results.map((r) => r.tahun_lulus),
+  });
 });
 
 // --- Manage Admins (super_admin only) ---
@@ -420,4 +491,220 @@ adminRoutes.get("/activity-logs", async (c) => {
     data: rows.results,
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
   });
+});
+
+// --- Pending Changes (sensitive field edits awaiting approval) ---
+
+// GET /api/admin/pending-changes — list pending changes with alumni info, scoped by admin role
+adminRoutes.get("/pending-changes", async (c) => {
+  const session = c.get("admin")!;
+  const scope = alumniScope(session);
+
+  const page = parseInt(c.req.query("page") || "1", 10);
+  const limit = Math.min(parseInt(c.req.query("limit") || "50", 10), 200);
+  const offset = (page - 1) * limit;
+
+  // Build WHERE with scope filtering on the joined alumni table
+  let whereSql = "WHERE pc.status = 'pending'";
+  const params: (string | number)[] = [];
+  if (scope.whereSql) {
+    whereSql += scope.whereSql.replace(/ AND /g, " AND a.");
+    params.push(...scope.params);
+  }
+
+  const countResult = await c.env.DB.prepare(
+    `SELECT COUNT(*) as total FROM pending_changes pc JOIN alumni a ON pc.alumni_id = a.id ${whereSql}`,
+  )
+    .bind(...params)
+    .first<{ total: number }>();
+  const total = countResult?.total ?? 0;
+
+  const rows = await c.env.DB.prepare(
+    `SELECT pc.id, pc.alumni_id, pc.field, pc.old_value, pc.new_value, pc.status, pc.proposed_by, pc.created_at,
+       a.nama_lengkap as alumni_name, a.gender, a.unit
+     FROM pending_changes pc
+     JOIN alumni a ON pc.alumni_id = a.id
+     ${whereSql}
+     ORDER BY pc.created_at DESC LIMIT ? OFFSET ?`,
+  )
+    .bind(...params, limit, offset)
+    .all();
+
+  return c.json({
+    data: rows.results,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+  });
+});
+
+// GET /api/admin/pending-changes/alumni/:alumniId — all pending changes for a specific alumni
+adminRoutes.get("/pending-changes/alumni/:alumniId", async (c) => {
+  const session = c.get("admin")!;
+  const alumniId = c.req.param("alumniId");
+
+  // Scope check — admin must have access to this alumni
+  const accessCheck = await fetchScopedAlumni(c.env.DB, session, alumniId);
+  if (!accessCheck) return c.json({ error: "Alumni di luar scope Anda" }, 403);
+
+  const rows = await c.env.DB.prepare(
+    `SELECT pc.id, pc.alumni_id, pc.field, pc.old_value, pc.new_value, pc.status, pc.proposed_by, pc.approved_by, pc.approved_at, pc.created_at
+     FROM pending_changes pc
+     WHERE pc.alumni_id = ?
+     ORDER BY pc.created_at DESC`,
+  )
+    .bind(alumniId)
+    .all();
+
+  return c.json({ data: rows.results });
+});
+
+// POST /api/admin/pending-changes/:id/approve — approve a pending change
+adminRoutes.post("/pending-changes/:id/approve", async (c) => {
+  const session = c.get("admin")!;
+  const changeId = c.req.param("id");
+
+  // Fetch the pending change with alumni info for scope check
+  const change = await c.env.DB.prepare(
+    `SELECT pc.*, a.gender, a.unit FROM pending_changes pc JOIN alumni a ON pc.alumni_id = a.id WHERE pc.id = ?`,
+  )
+    .bind(changeId)
+    .first<{ id: string; alumni_id: string; field: string; old_value: string | null; new_value: string | null; status: string }>();
+  if (!change) return c.json({ error: "Perubahan tidak ditemukan" }, 404);
+  if (change.status !== "pending") return c.json({ error: "Perubahan sudah diproses" }, 400);
+
+  // Scope check
+  const accessCheck = await fetchScopedAlumni(c.env.DB, session, change.alumni_id);
+  if (!accessCheck) return c.json({ error: "Alumni di luar scope Anda" }, 403);
+
+  // Apply the new value to the alumni table
+  await c.env.DB.prepare(`UPDATE alumni SET ${change.field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(change.new_value, change.alumni_id)
+    .run();
+
+  // Update pending_changes status
+  await c.env.DB.prepare(
+    "UPDATE pending_changes SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?",
+  )
+    .bind(session.adminId, changeId)
+    .run();
+
+  // Log to activity_logs with old/new values
+  await c.env.DB.prepare("INSERT INTO activity_logs (id, admin_id, alumni_id, action, details) VALUES (?, ?, ?, ?, ?)")
+    .bind(
+      ulid(),
+      session.adminId,
+      change.alumni_id,
+      "approve_change",
+      JSON.stringify({ alumniId: change.alumni_id, field: change.field, oldValue: change.old_value, newValue: change.new_value }),
+    )
+    .run();
+
+  // Create a notification for the alumni (target admins who manage this alumni)
+  const alumniRow = await c.env.DB.prepare("SELECT nama_lengkap, gender FROM alumni WHERE id = ?")
+    .bind(change.alumni_id)
+    .first<{ nama_lengkap: string; gender: string }>();
+  if (alumniRow) {
+    const targetRole = alumniRow.gender === "putra" ? "admin_putra" : "admin_putri";
+    await c.env.DB.prepare(
+      "INSERT INTO notifications (id, type, judul, pesan, target_role, target_gender, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(
+        ulid(),
+        "system",
+        "Perubahan Disetujui",
+        `Perubahan ${change.field} untuk ${alumniRow.nama_lengkap} telah disetujui.`,
+        targetRole,
+        alumniRow.gender,
+        session.adminId,
+      )
+      .run();
+  }
+
+  // Check if the alumni has any remaining pending changes; if none, set status_verifikasi='verified'
+  const remaining = await c.env.DB.prepare(
+    "SELECT COUNT(*) as c FROM pending_changes WHERE alumni_id = ? AND status = 'pending'",
+  )
+    .bind(change.alumni_id)
+    .first<{ c: number }>();
+  if ((remaining?.c ?? 0) === 0) {
+    await c.env.DB.prepare(
+      "UPDATE alumni SET status_verifikasi = 'verified', verified_by = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    )
+      .bind(session.adminId, change.alumni_id)
+      .run();
+  }
+
+  return c.json({ success: true, message: "Perubahan disetujui" });
+});
+
+// POST /api/admin/pending-changes/:id/reject — reject a pending change
+adminRoutes.post("/pending-changes/:id/reject", async (c) => {
+  const session = c.get("admin")!;
+  const changeId = c.req.param("id");
+
+  const change = await c.env.DB.prepare(
+    `SELECT pc.*, a.gender, a.unit FROM pending_changes pc JOIN alumni a ON pc.alumni_id = a.id WHERE pc.id = ?`,
+  )
+    .bind(changeId)
+    .first<{ id: string; alumni_id: string; field: string; old_value: string | null; new_value: string | null; status: string }>();
+  if (!change) return c.json({ error: "Perubahan tidak ditemukan" }, 404);
+  if (change.status !== "pending") return c.json({ error: "Perubahan sudah diproses" }, 400);
+
+  // Scope check
+  const accessCheck = await fetchScopedAlumni(c.env.DB, session, change.alumni_id);
+  if (!accessCheck) return c.json({ error: "Alumni di luar scope Anda" }, 403);
+
+  // Update pending_changes status (do NOT apply the new value)
+  await c.env.DB.prepare(
+    "UPDATE pending_changes SET status = 'rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?",
+  )
+    .bind(session.adminId, changeId)
+    .run();
+
+  // Log to activity_logs
+  await c.env.DB.prepare("INSERT INTO activity_logs (id, admin_id, alumni_id, action, details) VALUES (?, ?, ?, ?, ?)")
+    .bind(
+      ulid(),
+      session.adminId,
+      change.alumni_id,
+      "reject_change",
+      JSON.stringify({ alumniId: change.alumni_id, field: change.field, oldValue: change.old_value, newValue: change.new_value }),
+    )
+    .run();
+
+  // Create a notification for the alumni
+  const alumniRow = await c.env.DB.prepare("SELECT nama_lengkap, gender FROM alumni WHERE id = ?")
+    .bind(change.alumni_id)
+    .first<{ nama_lengkap: string; gender: string }>();
+  if (alumniRow) {
+    const targetRole = alumniRow.gender === "putra" ? "admin_putra" : "admin_putri";
+    await c.env.DB.prepare(
+      "INSERT INTO notifications (id, type, judul, pesan, target_role, target_gender, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(
+        ulid(),
+        "system",
+        "Perubahan Ditolak",
+        `Perubahan ${change.field} untuk ${alumniRow.nama_lengkap} ditolak.`,
+        targetRole,
+        alumniRow.gender,
+        session.adminId,
+      )
+      .run();
+  }
+
+  // Check remaining pending changes; if none, set status_verifikasi='verified'
+  const remaining = await c.env.DB.prepare(
+    "SELECT COUNT(*) as c FROM pending_changes WHERE alumni_id = ? AND status = 'pending'",
+  )
+    .bind(change.alumni_id)
+    .first<{ c: number }>();
+  if ((remaining?.c ?? 0) === 0) {
+    await c.env.DB.prepare(
+      "UPDATE alumni SET status_verifikasi = 'verified', verified_by = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    )
+      .bind(session.adminId, change.alumni_id)
+      .run();
+  }
+
+  return c.json({ success: true, message: "Perubahan ditolak" });
 });

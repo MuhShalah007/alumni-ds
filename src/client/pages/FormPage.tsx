@@ -347,7 +347,7 @@ export function FormPage() {
                 Password digunakan untuk login dan mengedit biodata Anda sendiri.
               </p>
               <Select label="Tingkat Privasi Profil *" name="privacyLevel" value={form.privacyLevel} onChange={(e) => update("privacyLevel", e.target.value)}>
-                <option value="public">Public — Tampil di direktori publik</option>
+                <option value="public">Public — Tampil di daftar alumni</option>
                 <option value="alumni_only">Alumni Only — Hanya untuk alumni</option>
                 <option value="private">Private — Hanya nama, angkatan & tahun lulus</option>
               </Select>

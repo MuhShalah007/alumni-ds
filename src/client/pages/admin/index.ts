@@ -6,3 +6,4 @@ export { ExcelPage } from "./ExcelPage";
 export { BroadcastPage } from "./BroadcastPage";
 export { AdminUsersPage } from "./AdminUsersPage";
 export { ActivityLogPage } from "./ActivityLogPage";
+export { PendingChangesPage } from "./PendingChangesPage";

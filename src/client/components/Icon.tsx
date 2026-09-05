@@ -35,13 +35,22 @@ export const Icons = {
     <Icon name="book-open-line" size={size} className={className} />
   ),
   ImportExport: ({ size = 20, className = "" }: { size?: number; className?: string }) => (
-    <Icon name="upload-download-line" size={size} className={className} />
+    <Icon name="file-excel-2-line" size={size} className={className} />
   ),
   Broadcast: ({ size = 20, className = "" }: { size?: number; className?: string }) => (
     <Icon name="notification-3-line" size={size} className={className} />
   ),
   ManageAdmins: ({ size = 20, className = "" }: { size?: number; className?: string }) => (
     <Icon name="group-line" size={size} className={className} />
+  ),
+  FileExcel: ({ size = 20, className = "" }: { size?: number; className?: string }) => (
+    <Icon name="file-excel-2-line" size={size} className={className} />
+  ),
+  FileImport: ({ size = 20, className = "" }: { size?: number; className?: string }) => (
+    <Icon name="file-upload-line" size={size} className={className} />
+  ),
+  FolderUser: ({ size = 20, className = "" }: { size?: number; className?: string }) => (
+    <Icon name="folder-user-line" size={size} className={className} />
   ),
   // Actions
   Print: ({ size = 18, className = "" }: { size?: number; className?: string }) => (
@@ -52,6 +61,9 @@ export const Icons = {
   ),
   Close: ({ size = 18, className = "" }: { size?: number; className?: string }) => (
     <Icon name="close-line" size={size} className={className} />
+  ),
+  Menu: ({ size = 18, className = "" }: { size?: number; className?: string }) => (
+    <Icon name="menu-line" size={size} className={className} />
   ),
   ArrowLeft: ({ size = 18, className = "" }: { size?: number; className?: string }) => (
     <Icon name="arrow-left-line" size={size} className={className} />
@@ -121,5 +133,11 @@ export const Icons = {
   ),
   Error: ({ size = 18, className = "" }: { size?: number; className?: string }) => (
     <Icon name="error-warning-line" size={size} className={className} />
+  ),
+  RefreshCw: ({ size = 18, className = "" }: { size?: number; className?: string }) => (
+    <Icon name="refresh-line" size={size} className={className} />
+  ),
+  Lock: ({ size = 18, className = "" }: { size?: number; className?: string }) => (
+    <Icon name="lock-line" size={size} className={className} />
   ),
 } satisfies Record<string, (props: { size?: number; className?: string }) => ReactNode>;

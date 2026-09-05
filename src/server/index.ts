@@ -7,7 +7,7 @@ import { adminRoutes } from "./routes/admin";
 import { excelRoutes } from "./routes/excel";
 import { broadcastRoutes } from "./routes/broadcast";
 import { notificationRoutes } from "./routes/notifications";
-import { uploadRoutes } from "./routes/upload";
+import { uploadRoutes, photoRoutes } from "./routes/upload";
 import { qrRoutes } from "./routes/qr";
 import { pushRoutes } from "./routes/push";
 import type { AppContext } from "./db/client";
@@ -20,6 +20,9 @@ app.use("*", corsMiddleware);
 // API routes
 app.route("/api/alumni", alumniRoutes);
 app.route("/api/alumni", uploadRoutes);
+// Public photo serving — mounted at root so `${APP_BASE_URL}/photos/<key>`
+// resolves (the handler lives in upload.ts but must NOT be under /api/alumni).
+app.route("/", photoRoutes);
 app.route("/api/auth", authRoutes);
 app.route("/api/admin", adminRoutes);
 app.route("/api/admin", broadcastRoutes);

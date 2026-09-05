@@ -15,8 +15,9 @@ import { AlumniListPage } from "./pages/admin/AlumniListPage";
 import { YearbookManagePage } from "./pages/admin/YearbookManagePage";
 import { ExcelPage } from "./pages/admin/ExcelPage";
 import { BroadcastPage } from "./pages/admin/BroadcastPage";
-import { AdminUsersPage } from "./pages/admin/AdminUsersPage";
 import { ActivityLogPage } from "./pages/admin/ActivityLogPage";
+import { AdminUsersPage } from "./pages/admin/AdminUsersPage";
+import { PendingChangesPage } from "./pages/admin/PendingChangesPage";
 
 function AdminGuard({ children }: { children: React.ReactNode }) {
   const { admin, restoring } = useAuth();
@@ -83,6 +84,7 @@ export function App() {
             <Route path="broadcast" element={<BroadcastPage />} />
             <Route path="activity-logs" element={<ActivityLogPage />} />
             <Route path="manage-admins" element={<AdminUsersPage />} />
+            <Route path="pending-changes" element={<PendingChangesPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

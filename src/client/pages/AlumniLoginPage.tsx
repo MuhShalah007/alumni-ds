@@ -26,6 +26,7 @@ export function AlumniLoginPage() {
         jsonBody: { noHp, password },
       });
       localStorage.setItem("alumni_token", res.token);
+      localStorage.removeItem("admin_token");
       navigate("/alumni/edit", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Login gagal");
@@ -69,12 +70,6 @@ export function AlumniLoginPage() {
             {loading ? "Memuat..." : "Masuk"}
           </Button>
         </form>
-
-        <div className="text-xs text-[#A1A1AA] space-y-1 p-3 bg-[#FAFAFA] rounded-lg border border-[#F4F4F5]">
-          <p className="font-semibold text-[#71717A] mb-1">Akun Test:</p>
-          <p>Putra: 081234567890 / alumni123</p>
-          <p>Putri: 081298765432 / alumni123</p>
-        </div>
 
         <div className="mt-6 space-y-3 text-center">
           <p className="text-sm text-[#52525B]">

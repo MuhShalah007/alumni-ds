@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
 import { Button, Select, Card } from "../../components/ui";
 import { Icons } from "../../components/Icon";
+import { Pagination } from "../../components/Pagination";
 import { apiFetch } from "../../lib/api";
 import { PUTRA_UNITS, PUTRI_UNITS } from "@shared/constants";
+import { Skeleton } from "../../components/Skeleton";
 
 interface YearbookEntry {
   id: string;
@@ -31,17 +32,24 @@ type PaperSize = "a4" | "b5";
 
 export function YearbookManagePage() {
   const [data, setData] = useState<YearbookEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<LayoutMode>("grid");
   const [paperSize, setPaperSize] = useState<PaperSize>("a4");
   const [perPage, setPerPage] = useState(6);
   const [filters, setFilters] = useState({ tahunLulus: "", angkatan: "", unit: "", gender: "", kelasNihai: "" });
 
+  const limit = 50;
+  const totalPages = Math.ceil(total / limit);
+
   const allUnits = [...PUTRA_UNITS, ...PUTRI_UNITS];
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
+    params.set("page", String(page));
+    params.set("limit", String(limit));
     if (filters.tahunLulus) params.set("tahunLulus", filters.tahunLulus);
     if (filters.angkatan) params.set("angkatan", filters.angkatan);
     if (filters.unit) params.set("unit", filters.unit);
@@ -49,10 +57,11 @@ export function YearbookManagePage() {
     if (filters.kelasNihai) params.set("kelasNihai", filters.kelasNihai);
 
     try {
-      const res = await apiFetch<{ data: YearbookEntry[] }>(`/admin/yearbook-data?${params}`, { auth: true });
+      const res = await apiFetch<{ data: YearbookEntry[]; total: number }>(`/admin/yearbook-data?${params}`, { auth: true });
       setData(res.data);
-    } catch { setData([]); } finally { setLoading(false); }
-  }, [filters]);
+      setTotal(res.total);
+    } catch { setData([]); setTotal(0); } finally { setLoading(false); }
+  }, [filters, page, limit]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -73,24 +82,24 @@ export function YearbookManagePage() {
       {/* Controls */}
       <Card className="p-4 mb-6 no-print">
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
-          <Select value={filters.tahunLulus} onChange={(e) => setFilters((f) => ({ ...f, tahunLulus: e.target.value }))}>
+          <Select value={filters.tahunLulus} onChange={(e) => { setFilters((f) => ({ ...f, tahunLulus: e.target.value })); setPage(1); }}>
             <option value="">Semua Tahun</option>
             {Array.from({ length: 20 }, (_, i) => 2024 - i).map((y) => <option key={y} value={y}>{y}</option>)}
           </Select>
-          <Select value={filters.angkatan} onChange={(e) => setFilters((f) => ({ ...f, angkatan: e.target.value }))}>
+          <Select value={filters.angkatan} onChange={(e) => { setFilters((f) => ({ ...f, angkatan: e.target.value })); setPage(1); }}>
             <option value="">Semua Angkatan</option>
             {Array.from({ length: 30 }, (_, i) => String(i + 1).padStart(2, "0")).map((a) => <option key={a} value={a}>{a}</option>)}
           </Select>
-          <Select value={filters.unit} onChange={(e) => setFilters((f) => ({ ...f, unit: e.target.value }))}>
+          <Select value={filters.unit} onChange={(e) => { setFilters((f) => ({ ...f, unit: e.target.value })); setPage(1); }}>
             <option value="">Semua Unit</option>
             {allUnits.map((u) => <option key={u} value={u}>{u}</option>)}
           </Select>
-          <Select value={filters.gender} onChange={(e) => setFilters((f) => ({ ...f, gender: e.target.value }))}>
+          <Select value={filters.gender} onChange={(e) => { setFilters((f) => ({ ...f, gender: e.target.value })); setPage(1); }}>
             <option value="">Semua Jenis Kelamin</option>
             <option value="putra">Putra</option>
             <option value="putri">Putri</option>
           </Select>
-          <Select value={filters.kelasNihai} onChange={(e) => setFilters((f) => ({ ...f, kelasNihai: e.target.value }))}>
+          <Select value={filters.kelasNihai} onChange={(e) => { setFilters((f) => ({ ...f, kelasNihai: e.target.value })); setPage(1); }}>
             <option value="">Semua Kelas</option>
             {["A", "B", "C", "D", "Tidak Paralel"].map((k) => <option key={k} value={k}>{k}</option>)}
           </Select>
@@ -100,7 +109,7 @@ export function YearbookManagePage() {
             <span className="text-sm text-slate-500">Layout:</span>
             {(["grid", "classic", "directory"] as LayoutMode[]).map((m) => (
               <button key={m} onClick={() => setLayout(m)} className={`px-3 py-1 text-sm rounded-lg ${layout === m ? "bg-primary-700 text-white" : "bg-slate-100 text-slate-600"}`}>
-                {m === "grid" ? "Grid Card" : m === "classic" ? "Classic" : "Directory"}
+                {m === "grid" ? "Grid Card" : m === "classic" ? "Classic" : "Daftar"}
               </button>
             ))}
           </div>
@@ -128,7 +137,15 @@ export function YearbookManagePage() {
 
       {/* Print preview */}
       {loading ? (
-        <p className="text-center text-slate-500 py-8">Memuat data...</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="bg-white rounded-lg border border-slate-100 p-4">
+              <Skeleton className="w-16 h-16 rounded-full mx-auto mb-3" />
+              <Skeleton className="h-4 w-24 mx-auto mb-2" />
+              <Skeleton className="h-3 w-16 mx-auto" />
+            </div>
+          ))}
+        </div>
       ) : data.length === 0 ? (
         <Card className="p-8 text-center text-slate-500">Belum ada data. {pages.length} halaman akan dihasilkan.</Card>
       ) : (
@@ -218,6 +235,20 @@ export function YearbookManagePage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Data pagination */}
+      {!loading && total > 0 && (
+        <div className="mt-6 no-print">
+          <Pagination
+            page={page}
+            limit={limit}
+            total={total}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            onLimitChange={() => setPage(1)}
+          />
         </div>
       )}
     </div>

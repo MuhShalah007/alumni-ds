@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Button, Select, Input, Card } from "../components/ui";
 import { Icons } from "../components/Icon";
+import { Pagination } from "../components/Pagination";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { PUTRA_UNITS, PUTRI_UNITS } from "@shared/constants";
+import { YearbookSkeleton } from "../components/Skeleton";
 
 // Check if alumni is logged in (separate from admin auth)
 function getAlumniToken(): string | null {
@@ -28,11 +30,18 @@ type LayoutMode = "grid" | "classic" | "directory";
 export function YearbookPage() {
   const { admin } = useAuth();
   const alumniToken = getAlumniToken();
-  const isAlumni = !admin && !!alumniToken;
+  const isAlumni = !!alumniToken;
   const [data, setData] = useState<YearbookEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<LayoutMode>("grid");
   const [filters, setFilters] = useState({ tahunLulus: "", angkatan: "", unit: "", search: "" });
+  const [angkatanOptions, setAngkatanOptions] = useState<string[]>([]);
+  const [tahunLulusOptions, setTahunLulusOptions] = useState<number[]>([]);
+
+  const limit = layout === "directory" ? 50 : 24;
+  const totalPages = Math.ceil(total / limit);
 
   // Units are scoped by admin role or alumni gender
   const scopedUnits = useMemo(() => {
@@ -59,40 +68,71 @@ export function YearbookPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
+    params.set("page", String(page));
+    params.set("limit", String(limit));
     if (filters.tahunLulus) params.set("tahunLulus", filters.tahunLulus);
     if (filters.angkatan) params.set("angkatan", filters.angkatan);
     if (filters.unit) params.set("unit", filters.unit);
 
     try {
-      let res: { data: YearbookEntry[] };
+      let res: { data: YearbookEntry[]; total: number };
       if (isAlumni) {
         // Alumni uses /api/alumni/yearbook (gender-scoped by own gender)
         const token = localStorage.getItem("alumni_token");
-        const resp = await fetch(`/api/alumni/yearbook`, {
+        const resp = await fetch(`/api/alumni/yearbook?${params}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        res = await resp.json() as { data: YearbookEntry[] };
+        res = await resp.json() as { data: YearbookEntry[]; total: number };
       } else {
         // Admin uses /api/admin/yearbook-data (gender-scoped by admin role)
-        res = await apiFetch<{ data: YearbookEntry[] }>(`/admin/yearbook-data?${params}`, { auth: true });
+        res = await apiFetch<{ data: YearbookEntry[]; total: number }>(`/admin/yearbook-data?${params}`, { auth: true });
       }
+      // Server already filters tahunLulus/angkatan/unit; apply client-side search on current page
       let filtered = res.data;
-      if (filters.tahunLulus) filtered = filtered.filter((d) => String(d.tahun_lulus) === filters.tahunLulus);
-      if (filters.angkatan) filtered = filtered.filter((d) => d.angkatan === filters.angkatan);
-      if (filters.unit) filtered = filtered.filter((d) => d.unit === filters.unit);
       if (filters.search) {
         const q = filters.search.toLowerCase();
         filtered = filtered.filter((d) => d.nama_lengkap.toLowerCase().includes(q) || d.nama_panggilan.toLowerCase().includes(q));
       }
       setData(filtered);
+      setTotal(res.total);
     } catch {
       setData([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [filters, isAlumni]);
+  }, [filters, isAlumni, page, limit]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+// Fetch dropdown options (angkatan & tahun_lulus) from server, scoped by role/gender
+useEffect(() => {
+  let cancelled = false;
+  (async () => {
+    try {
+      let res: { angkatan: string[]; tahunLulus: number[] };
+      if (isAlumni) {
+        const token = localStorage.getItem("alumni_token");
+        const resp = await fetch("/api/alumni/angkatan-list", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        res = await resp.json() as { angkatan: string[]; tahunLulus: number[] };
+      } else {
+        res = await apiFetch<{ angkatan: string[]; tahunLulus: number[] }>("/admin/angkatan-list", { auth: true });
+      }
+      if (!cancelled) {
+        setAngkatanOptions(res.angkatan ?? []);
+        setTahunLulusOptions(res.tahunLulus ?? []);
+      }
+    } catch {
+      if (!cancelled) {
+        setAngkatanOptions([]);
+        setTahunLulusOptions([]);
+      }
+    }
+  })();
+  return () => { cancelled = true; };
+}, [isAlumni, admin]);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
@@ -100,7 +140,7 @@ export function YearbookPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Buku Alumni</h1>
           <p className="text-sm text-slate-600">
-            {data.length} alumni{scopeLabel ? ` · ${scopeLabel}` : ""}
+            {total} alumni{scopeLabel ? ` · ${scopeLabel}` : ""}
           </p>
         </div>
         <Button variant="outline" onClick={() => window.print()}><Icons.Print size={18} /> Cetak / PDF</Button>
@@ -109,16 +149,16 @@ export function YearbookPage() {
       {/* Filters */}
       <Card className="p-4 mb-6 no-print">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Input placeholder="Cari nama..." value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} />
-          <Select value={filters.tahunLulus} onChange={(e) => setFilters((f) => ({ ...f, tahunLulus: e.target.value }))}>
+          <Input placeholder="Cari nama..." value={filters.search} onChange={(e) => { setFilters((f) => ({ ...f, search: e.target.value })); setPage(1); }} />
+          <Select value={filters.tahunLulus} onChange={(e) => { setFilters((f) => ({ ...f, tahunLulus: e.target.value })); setPage(1); }}>
             <option value="">Semua Tahun Lulus</option>
-            {Array.from({ length: 20 }, (_, i) => 2024 - i).map((y) => <option key={y} value={y}>{y}</option>)}
+            {tahunLulusOptions.map((y) => <option key={y} value={y}>{y}</option>)}
           </Select>
-          <Select value={filters.angkatan} onChange={(e) => setFilters((f) => ({ ...f, angkatan: e.target.value }))}>
+          <Select value={filters.angkatan} onChange={(e) => { setFilters((f) => ({ ...f, angkatan: e.target.value })); setPage(1); }}>
             <option value="">Semua Angkatan</option>
-            {Array.from({ length: 30 }, (_, i) => String(i + 1).padStart(2, "0")).map((a) => <option key={a} value={a}>{a}</option>)}
+            {angkatanOptions.map((a) => <option key={a} value={a}>{a}</option>)}
           </Select>
-          <Select value={filters.unit} onChange={(e) => setFilters((f) => ({ ...f, unit: e.target.value }))}>
+          <Select value={filters.unit} onChange={(e) => { setFilters((f) => ({ ...f, unit: e.target.value })); setPage(1); }}>
             <option value="">Semua Unit</option>
             {scopedUnits.map((u) => <option key={u} value={u}>{u}</option>)}
           </Select>
@@ -126,15 +166,15 @@ export function YearbookPage() {
         <div className="flex gap-2 mt-3">
           <span className="text-sm text-slate-500 self-center mr-2">Layout:</span>
           {(["grid", "classic", "directory"] as LayoutMode[]).map((m) => (
-            <button key={m} onClick={() => setLayout(m)} className={`px-3 py-1 text-sm rounded-lg ${layout === m ? "bg-primary-700 text-white" : "bg-slate-100 text-slate-600"}`}>
-              {m === "grid" ? "Grid Card" : m === "classic" ? "Classic Spread" : "Directory"}
+            <button key={m} onClick={() => { setLayout(m); setPage(1); }} className={`px-3 py-1 text-sm rounded-lg ${layout === m ? "bg-primary-700 text-white" : "bg-slate-100 text-slate-600"}`}>
+              {m === "grid" ? "Grid Card" : m === "classic" ? "Classic Spread" : "Daftar"}
             </button>
           ))}
         </div>
       </Card>
 
       {loading ? (
-        <p className="text-slate-500 text-center py-8">Memuat data...</p>
+        <YearbookSkeleton />
       ) : data.length === 0 ? (
         <Card className="p-8 text-center text-slate-500">Belum ada data alumni untuk {scopeLabel || "kategori ini"}.</Card>
       ) : (
@@ -199,6 +239,20 @@ export function YearbookPage() {
                 </tbody>
               </table>
             </Card>
+          )}
+
+          {/* Pagination */}
+          {!loading && total > 0 && (
+            <div className="mt-6 no-print">
+              <Pagination
+                page={page}
+                limit={limit}
+                total={total}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                onLimitChange={() => setPage(1)}
+              />
+            </div>
           )}
         </>
       )}

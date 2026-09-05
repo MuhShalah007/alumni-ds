@@ -9,7 +9,7 @@ interface ExportRow {
   namaLengkap: string;
   namaPondok: string | null;
   panggilan: string;
-  gender: string;
+  jenisKelamin: string;
   unit: string;
   kelasNihai: string;
   angkatan: string;
@@ -64,7 +64,7 @@ export function ExcelPage() {
       namaLengkap: "Contoh Nama",
       namaPondok: "",
       panggilan: "Contoh",
-      gender: "putra",
+      jenisKelamin: "putra",
       unit: "KMI",
       kelasNihai: "A",
       angkatan: "15",
@@ -119,7 +119,7 @@ export function ExcelPage() {
       <div className="grid md:grid-cols-2 gap-6">
         {/* Export */}
         <Card className="p-6">
-          <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2"><Icons.ImportExport size={20} /> Export Data</h2>
+          <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2"><Icons.FileExcel size={20} /> Export Data</h2>
           <p className="text-sm text-slate-600 mb-4">Download semua data alumni ke file Excel (.xlsx) dengan filter opsional.</p>
 
           <div className="space-y-3 mb-4">
@@ -143,11 +143,11 @@ export function ExcelPage() {
 
         {/* Import */}
         <Card className="p-6">
-          <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2"><Icons.ImportExport size={20} /> Import Data</h2>
+          <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2"><Icons.FileImport size={20} /> Import Data</h2>
           <p className="text-sm text-slate-600 mb-4">Upload file Excel untuk batch import data alumni.</p>
 
           <Button variant="outline" onClick={handleDownloadTemplate} className="w-full mb-4">
-            <Icons.Copy size={16} className="inline" /> Download Template
+            <Icons.FileExcel size={16} className="inline" /> Download Template
           </Button>
 
           <div className="space-y-3 mb-4">
@@ -160,7 +160,7 @@ export function ExcelPage() {
           <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center">
             <input type="file" accept=".xlsx,.xls" onChange={handleImport} disabled={importing} className="hidden" id="import-file" />
             <label htmlFor="import-file" className="cursor-pointer flex flex-col items-center gap-2 text-sm text-primary-600 hover:underline">
-              <Icons.ImportExport size={32} className="text-slate-400" />
+              <Icons.FileImport size={32} className="text-slate-400" />
               {importing ? "Mengimport..." : "Pilih file Excel"}
             </label>
           </div>

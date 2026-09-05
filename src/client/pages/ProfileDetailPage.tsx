@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
-import { useParams } from "react-router-dom";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useParams, Link } from "react-router-dom";
 import { Button, Card, Modal } from "../components/ui";
 import { Icons } from "../components/Icon";
+import { ProfileSkeleton } from "../components/Skeleton";
 import { apiFetch, ApiError } from "../lib/api";
 import { generateVCard } from "../lib/vcard";
 
@@ -24,6 +25,7 @@ interface ProfileData {
   kesan_pesan: string;
   momen_berkesan: string;
   foto_url: string | null;
+  background_url: string | null;
   sosial_media: { instagram?: string; facebook?: string; linkedin?: string; tiktok?: string } | null;
   status_aktivitas: string | null;
   detail_aktivitas: string | null;
@@ -41,6 +43,10 @@ export function ProfileDetailPage() {
   const [qrSvg, setQrSvg] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState("");
+  // Persist the generated QR SVG across modal open/close so we don't
+  // re-fetch from the server every time the modal is reopened.
+  const qrSvgRef = useRef<string | null>(null);
+  const [alumniLoggedIn, setAlumniLoggedIn] = useState(false);
 
   useEffect(() => {
     apiFetch<{ alumni: ProfileData }>(`/alumni/profile/${id}`)
@@ -49,6 +55,9 @@ export function ProfileDetailPage() {
         setError(err instanceof ApiError ? err.message : "Profil tidak ditemukan");
       });
   }, [id]);
+  useEffect(() => {
+    setAlumniLoggedIn(!!localStorage.getItem("alumni_token"));
+  }, []);
 
   const handleDownloadVCard = useCallback(() => {
     if (!profile) return;
@@ -114,23 +123,62 @@ export function ProfileDetailPage() {
   const handleOpenQr = useCallback(async () => {
     if (!profile) return;
     setQrOpen(true);
+    setQrError("");
+
+    // Use cached SVG if available — no re-fetch on repeated modal opens.
+    if (qrSvgRef.current) {
+      setQrSvg(qrSvgRef.current);
+      setQrLoading(false);
+      return;
+    }
+
     setQrSvg(null);
     setQrLoading(true);
-    setQrError("");
 
     const profileUrl = `${window.location.origin}/p/${profile.id}`;
 
     try {
       // Call our server-side proxy to avoid browser CORS restrictions with
-      // the qrcode-monkey API. The server renders the styled SVG and returns
-      // it directly.
+      // the qrcode-monkey API. The server renders the styled SVG (with the
+      // logo embedded natively for scannability) and returns it directly.
       const res = await fetch(`/api/qr/styled?url=${encodeURIComponent(profileUrl)}`);
       if (!res.ok) throw new Error("QR API gagal");
       const svgText = await res.text();
       if (!svgText.startsWith("<")) throw new Error("Respon bukan SVG");
+      qrSvgRef.current = svgText;
       setQrSvg(svgText);
     } catch {
       // Fallback to simple QR code via qrserver.com
+      setQrError("Gagal membuat QR styled, menggunakan QR sederhana");
+      setQrSvg(null);
+      qrSvgRef.current = null;
+    } finally {
+      setQrLoading(false);
+    }
+  }, [profile]);
+
+  // Force a fresh QR generation, bypassing the client-side cache.
+  const handleRegenerateQr = useCallback(async () => {
+    if (!profile) return;
+    setQrSvg(null);
+    setQrLoading(true);
+    setQrError("");
+    qrSvgRef.current = null;
+
+    const profileUrl = `${window.location.origin}/p/${profile.id}`;
+
+    try {
+      // nocache=1 tells the server to skip its KV cache and regenerate
+      // fresh from qrcode-monkey, then refresh the stored cache entry.
+      const res = await fetch(
+        `/api/qr/styled?url=${encodeURIComponent(profileUrl)}&nocache=1`,
+      );
+      if (!res.ok) throw new Error("QR API gagal");
+      const svgText = await res.text();
+      if (!svgText.startsWith("<")) throw new Error("Respon bukan SVG");
+      qrSvgRef.current = svgText;
+      setQrSvg(svgText);
+    } catch {
       setQrError("Gagal membuat QR styled, menggunakan QR sederhana");
       setQrSvg(null);
     } finally {
@@ -144,7 +192,7 @@ export function ProfileDetailPage() {
     </div>
   );
 
-  if (!profile) return <div className="max-w-2xl mx-auto px-4 py-8"><p className="text-slate-500">Memuat profil...</p></div>;
+  if (!profile) return <ProfileSkeleton />;
 
   const profileUrl = `${window.location.origin}/p/${profile.id}`;
 
@@ -153,20 +201,43 @@ export function ProfileDetailPage() {
     return (
       <div className="max-w-2xl mx-auto px-4 py-8">
         <Card className="overflow-hidden">
-          <div className="bg-gradient-to-br from-primary-600 to-primary-800 h-24" />
+          <div className="h-24 overflow-hidden">
+            {profile.background_url ? (
+              profile.background_url.startsWith("http") || profile.background_url.startsWith("/") || profile.background_url.startsWith("data:") ? (
+                <img src={profile.background_url} alt="Background" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full" style={{ background: profile.background_url }} />
+              )
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-primary-600 to-primary-800" />
+            )}
+          </div>
           <div className="px-6 pb-6">
             <div className="flex items-end gap-4 -mt-12 mb-4">
-              <div className={`w-24 h-24 rounded-xl border-4 border-white shadow-lg flex items-center justify-center ${profile.gender === "putra" ? "bg-blue-100 text-blue-400" : "bg-pink-100 text-pink-400"}`}>
-                <Icons.User size={36} />
-              </div>
+              {profile.foto_url ? (
+                <img src={profile.foto_url} alt={profile.nama_lengkap} className="w-24 h-24 rounded-xl object-cover border-4 border-white shadow-lg" />
+              ) : (
+                <div className={`w-24 h-24 rounded-xl border-4 border-white shadow-lg flex items-center justify-center ${profile.gender === "putra" ? "bg-blue-100 text-blue-400" : "bg-pink-100 text-pink-400"}`}>
+                  <Icons.User size={36} />
+                </div>
+              )}
             </div>
             <h1 className="text-2xl font-bold text-slate-800">{profile.nama_lengkap}</h1>
+            {profile.nama_panggilan && <p className="text-slate-500">{profile.nama_panggilan}</p>}
             <div className="flex flex-wrap gap-2 mt-3">
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
                 Angkatan {profile.angkatan} — Lulus {profile.tahun_lulus}
               </span>
             </div>
-            <p className="mt-4 text-sm text-slate-400 italic">@Akun di privasi</p>
+            <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center flex-shrink-0">
+                <Icons.Lock size={20} className="text-slate-500" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-700">Akun di privasi</p>
+                <p className="text-xs text-slate-500">Pemilik akun memilih untuk menyembunyikan informasi detailnya.</p>
+              </div>
+            </div>
           </div>
         </Card>
       </div>
@@ -178,9 +249,24 @@ export function ProfileDetailPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
       {/* Profile Card */}
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden relative">
+        {alumniLoggedIn && (
+          <Link to="/alumni/edit" className="absolute top-3 right-3 z-10 w-10 h-10 rounded-full bg-[#087348] text-white flex items-center justify-center shadow-lg hover:bg-[#065f37] transition-colors no-print" title="Edit Biodata">
+            <Icons.Edit size={18} />
+          </Link>
+        )}
         {/* Header with photo */}
-        <div className="bg-gradient-to-br from-primary-600 to-primary-800 h-24" />
+        <div className="h-24 overflow-hidden">
+          {profile.background_url ? (
+            profile.background_url.startsWith("http") || profile.background_url.startsWith("/") || profile.background_url.startsWith("data:") ? (
+              <img src={profile.background_url} alt="Background" className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full" style={{ background: profile.background_url }} />
+            )
+          ) : (
+            <div className="w-full h-full bg-gradient-to-br from-primary-600 to-primary-800" />
+          )}
+        </div>
         <div className="px-6 pb-6">
           <div className="flex items-end gap-4 -mt-12 mb-4">
             {profile.foto_url ? (
@@ -312,6 +398,7 @@ export function ProfileDetailPage() {
               <p className="text-sm text-slate-600">Scan QR code untuk membuka profil ini</p>
               <div className="flex flex-wrap gap-2 justify-center">
                 <Button size="sm" variant="outline" onClick={handleDownloadQr}><Icons.Download size={16} className="inline -mt-0.5 mr-1" /> Download QR</Button>
+                <Button size="sm" variant="outline" onClick={handleRegenerateQr}><Icons.RefreshCw size={16} className="inline -mt-0.5 mr-1" /> Buat Ulang</Button>
                 <Button size="sm" onClick={() => setQrOpen(false)}>Tutup</Button>
               </div>
             </>

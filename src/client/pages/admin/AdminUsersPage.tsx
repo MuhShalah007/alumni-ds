@@ -3,6 +3,7 @@ import { Button, Input, Select, Card, Badge, Modal } from "../../components/ui";
 import { apiFetch, ApiError } from "../../lib/api";
 import { useAuth } from "../../hooks/useAuth";
 import { ADMIN_ROLES } from "@shared/constants";
+import { TableSkeleton } from "../../components/Skeleton";
 
 interface AdminUser {
   id: string;
@@ -78,7 +79,9 @@ export function AdminUsersPage() {
 
       <Card className="overflow-hidden">
         {loading ? (
-          <p className="p-8 text-center text-slate-500">Memuat...</p>
+        <div className="p-4">
+          <TableSkeleton />
+        </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">

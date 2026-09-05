@@ -33,7 +33,9 @@ uploadRoutes.post(
         await c.env.PHOTOS.put(key, file.stream(), {
           httpMetadata: { contentType: file.type },
         });
-        const url = `${c.env.APP_BASE_URL}/photos/${key}`;
+        // Return a relative URL so the browser resolves it against the
+        // current origin — works in dev (any port) and production alike.
+        const url = `/photos/${key.replace(/^photos\//, "")}`;
         return c.json({ url, storage: "r2" });
       }
     } catch {
@@ -49,9 +51,57 @@ uploadRoutes.post(
   },
 );
 
-// GET /photos/:key — serve photo from R2
-uploadRoutes.get("/photos/:key", async (c) => {
-  const key = `photos/${c.req.param("key")}`;
+// POST /api/alumni/upload-background — upload background/cover photo
+uploadRoutes.post(
+  "/upload-background",
+  rateLimit({ prefix: "upload-bg", maxRequests: 20, windowMs: 600_000 }),
+  async (c) => {
+    const formData = await c.req.formData();
+    const file = formData.get("photo") as File | null;
+    if (!file) return c.json({ error: "File background tidak ditemukan" }, 400);
+
+    if (!file.type.startsWith("image/")) {
+      return c.json({ error: "File harus berupa gambar" }, 400);
+    }
+
+    if (file.size > 500_000) {
+      return c.json({ error: "Ukuran background maksimal 500KB. Mohon kompres terlebih dahulu." }, 400);
+    }
+
+    const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    const key = `photos/backgrounds/${ulid()}.${ext}`;
+
+    try {
+      if (c.env.PHOTOS) {
+        await c.env.PHOTOS.put(key, file.stream(), {
+          httpMetadata: { contentType: file.type },
+        });
+        const url = `/photos/${key.replace(/^photos\//, "")}`;
+        return c.json({ url, storage: "r2" });
+      }
+    } catch {
+      // Fall through to base64
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const dataUrl = `data:${file.type};base64,${base64}`;
+
+    return c.json({ url: dataUrl, storage: "base64" });
+  },
+);
+
+// GET /photos/* — serve photo from R2.
+// Mounted at the app root (NOT under /api/alumni) so that relative URLs of
+// the form `/photos/<publicPath>` resolve correctly. The `<publicPath>`
+// captured after `/photos/` is re-prefixed with `photos/` to form the R2 key,
+// so both profile photos (`<id>.ext`) and backgrounds (`backgrounds/<id>.ext`)
+// are served by the same route.
+export const photoRoutes = new Hono<AppContext>();
+
+photoRoutes.get("/photos/*", async (c) => {
+  const publicPath = c.req.path.replace(/^\/photos\//, "");
+  const key = `photos/${publicPath}`;
   if (!c.env.PHOTOS) return c.json({ error: "Storage tidak tersedia" }, 503);
 
   const object = await c.env.PHOTOS.get(key);

@@ -39,6 +39,7 @@ export const alumni = sqliteTable(
     kesanPesan: text("kesan_pesan").notNull(),
     momenBerkesan: text("momen_berkesan").notNull(),
     fotoUrl: text("foto_url"),
+    backgroundUrl: text("background_url"),
     sosialMedia: text("sosial_media"),
     statusAktivitas: text("status_aktivitas"),
     detailAktivitas: text("detail_aktivitas"),
@@ -122,6 +123,23 @@ export const notificationReads = sqliteTable("notification_reads", {
   uniqRead: uniqueIndex("idx_notif_reads_uniq").on(t.notificationId, t.adminId),
 }));
 
+// 8. Pending Changes (sensitive field edits awaiting admin approval)
+export const pendingChanges = sqliteTable("pending_changes", {
+  id: text("id").primaryKey(),
+  alumniId: text("alumni_id").notNull().references(() => alumni.id, { onDelete: "cascade" }),
+  field: text("field").notNull(),
+  oldValue: text("old_value"),
+  newValue: text("new_value"),
+  status: text("status", { enum: ["pending", "approved", "rejected"] }).notNull().default("pending"),
+  proposedBy: text("proposed_by"),
+  approvedBy: text("approved_by").references(() => admins.id),
+  approvedAt: text("approved_at"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (t) => ({
+  alumniIdx: index("idx_pending_changes_alumni").on(t.alumniId),
+  statusIdx: index("idx_pending_changes_status").on(t.status),
+}));
+
 export type Admin = typeof admins.$inferSelect;
 export type AdminInsert = typeof admins.$inferInsert;
 export type Alumni = typeof alumni.$inferSelect;
@@ -130,4 +148,5 @@ export type Broadcast = typeof broadcasts.$inferSelect;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 export type ActivityLog = typeof activityLogs.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
-export type NotificationRead = typeof notificationReads.$inferSelect;
+export type PendingChange = typeof pendingChanges.$inferSelect;
+export type PendingChangeInsert = typeof pendingChanges.$inferInsert;

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { Button, Input, Select, Textarea, Card, Badge } from "../../components/ui";
 import { Icons } from "../../components/Icon";
 import { apiFetch, ApiError } from "../../lib/api";
+import { Skeleton } from "../../components/Skeleton";
 import { useAuth } from "../../hooks/useAuth";
 
 interface Notification {
@@ -194,7 +195,21 @@ export function BroadcastPage() {
         {/* Notification list */}
         <div className="space-y-3">
           {loading ? (
-            <Card className="p-8 text-center text-slate-500">Memuat notifikasi...</Card>
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Card key={i} className="p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Skeleton className="w-4 h-4 rounded" />
+                      <Skeleton className="h-5 w-20 rounded-full" />
+                    </div>
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                  <Skeleton className="h-5 w-3/4 mb-2" />
+                  <Skeleton className="h-4 w-full" />
+                </Card>
+              ))}
+            </div>
           ) : notifications.length === 0 ? (
             <Card className="p-8 text-center text-slate-500">
               <Icons.Inbox size={32} className="text-slate-300 mx-auto mb-2" />

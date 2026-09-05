@@ -12,24 +12,22 @@
     {
       "binding": "DB",
       "database_name": "alumni-db",
-      "database_id": "local",
+      "database_id": "877c9577-0677-4c9b-a2c2-86ca9bb9b235",
       "migrations_dir": "./migrations"
     }
   ],
   // JWT_SECRET: set via 'wrangler secret put JWT_SECRET'
   "vars": {
-    "APP_BASE_URL": "http://localhost:5173"
+    "APP_BASE_URL": "https://alumni-ds.darsya-dev.workers.dev"
   },
-  "r2_buckets": [
-    {
-      "binding": "PHOTOS",
-      "bucket_name": "alumni-photos"
-    }
-  ],
+  // R2 bucket "alumni-photos" not creatable from current API token (token lacks R2 scope).
+  // Upload route falls back to Base64-in-D1 when PHOTOS binding is absent.
+  // To enable R2: create bucket via dashboard, then re-add:
+  // "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "alumni-photos" }]
   "kv_namespaces": [
     {
       "binding": "RATE_LIMIT",
-      "id": "local"
+      "id": "47bca4ba7e93424a97e8a17779baf1ba"
     }
   ],
   "observability": {

@@ -33,7 +33,7 @@ alumniRoutes.post("/check-phone", rateLimit({ prefix: "check-phone", maxRequests
     return c.json({ error: "Nomor HP tidak valid" }, 400);
   }
 
-  const existing = await c.env.DB.prepare("SELECT id, nama_lengkap, nama_panggilan FROM alumni WHERE no_hp = ?")
+  const existing = await c.env.DB.prepare("SELECT id, nama_lengkap, nama_panggilan FROM alumni WHERE no_hp = ? AND deleted_at IS NULL")
     .bind(normalized)
     .first<{ id: string; nama_lengkap: string; nama_panggilan: string }>();
 
@@ -66,7 +66,7 @@ alumniRoutes.post("/submit", rateLimit({ prefix: "submit", maxRequests: 5, windo
     return c.json({ error: `Unit ${data.unit} tidak valid untuk gender ${data.gender}` }, 400);
   }
 
-  const existing = await c.env.DB.prepare("SELECT id FROM alumni WHERE no_hp = ?")
+  const existing = await c.env.DB.prepare("SELECT id FROM alumni WHERE no_hp = ? AND deleted_at IS NULL")
     .bind(normalizedPhone)
     .first();
   if (existing) {
@@ -135,7 +135,7 @@ alumniRoutes.post("/login", rateLimit({ prefix: "alumni-login", maxRequests: 10,
     return c.json({ error: "Nomor HP tidak valid" }, 400);
   }
 
-  const row = await c.env.DB.prepare("SELECT id, nama_lengkap, password_hash FROM alumni WHERE no_hp = ?")
+  const row = await c.env.DB.prepare("SELECT id, nama_lengkap, password_hash FROM alumni WHERE no_hp = ? AND deleted_at IS NULL")
     .bind(normalizedPhone)
     .first<{ id: string; nama_lengkap: string; password_hash: string | null }>();
 
@@ -160,7 +160,7 @@ alumniRoutes.get("/me", async (c) => {
   const payload = await verifyJwt<AlumniSession>(token, c.env.JWT_SECRET).catch(() => null);
   if (!payload || payload.type !== "alumni") return c.json({ error: "Unauthorized" }, 401);
 
-  const row = await c.env.DB.prepare("SELECT * FROM alumni WHERE id = ?")
+  const row = await c.env.DB.prepare("SELECT * FROM alumni WHERE id = ? AND deleted_at IS NULL")
     .bind(payload.alumniId)
     .first();
 
@@ -207,7 +207,7 @@ alumniRoutes.put("/me", async (c) => {
 
   // Read current values of sensitive fields for old_value capture
   const existing = await c.env.DB.prepare(
-    "SELECT id, no_hp, gender, tempat_lahir, tanggal_lahir, angkatan FROM alumni WHERE id = ?",
+    "SELECT id, no_hp, gender, tempat_lahir, tanggal_lahir, angkatan FROM alumni WHERE id = ? AND deleted_at IS NULL",
   )
     .bind(payload.alumniId)
     .first<{ id: string; no_hp: string; gender: string; tempat_lahir: string; tanggal_lahir: string; angkatan: string }>();
@@ -218,7 +218,7 @@ alumniRoutes.put("/me", async (c) => {
     normalizedPhone = normalizePhone(data.noHp) ?? undefined;
     if (!normalizedPhone) return c.json({ error: "Nomor HP tidak valid" }, 400);
     if (normalizedPhone !== existing.no_hp) {
-      const dup = await c.env.DB.prepare("SELECT id FROM alumni WHERE no_hp = ? AND id != ?")
+      const dup = await c.env.DB.prepare("SELECT id FROM alumni WHERE no_hp = ? AND id != ? AND deleted_at IS NULL")
         .bind(normalizedPhone, existing.id)
         .first();
       if (dup) return c.json({ error: "Nomor HP sudah digunakan alumni lain" }, 409);
@@ -267,7 +267,7 @@ alumniRoutes.put("/me", async (c) => {
   if (updates.length > 0) {
     updates.push("updated_at = CURRENT_TIMESTAMP");
     values.push(existing.id);
-    await c.env.DB.prepare(`UPDATE alumni SET ${updates.join(", ")} WHERE id = ?`)
+    await c.env.DB.prepare(`UPDATE alumni SET ${updates.join(", ")} WHERE id = ? AND deleted_at IS NULL`)
       .bind(...values)
       .run();
   }
@@ -578,7 +578,7 @@ alumniRoutes.put("/by-token/:token", async (c) => {
 alumniRoutes.get("/profile/:id", async (c) => {
   const id = c.req.param("id");
   const row = await c.env.DB.prepare(
-    "SELECT id, nama_lengkap, nama_panggilan, tempat_lahir, tanggal_lahir, gender, unit, kelas_nihai, angkatan, tahun_lulus, nama_angkatan, alamat, no_hp, email, motto, kesan_pesan, momen_berkesan, foto_url, background_url, sosial_media, status_aktivitas, detail_aktivitas, privacy_level, photo_privacy, status_verifikasi FROM alumni WHERE id = ?",
+    "SELECT id, nama_lengkap, nama_panggilan, tempat_lahir, tanggal_lahir, gender, unit, kelas_nihai, angkatan, tahun_lulus, nama_angkatan, alamat, no_hp, email, motto, kesan_pesan, momen_berkesan, foto_url, background_url, sosial_media, status_aktivitas, detail_aktivitas, privacy_level, photo_privacy, status_verifikasi FROM alumni WHERE id = ? AND deleted_at IS NULL",
   )
     .bind(id)
     .first();
@@ -632,12 +632,12 @@ alumniRoutes.get("/angkatan-list", async (c) => {
   if (!alumni) return c.json({ error: "Alumni tidak ditemukan" }, 404);
 
   const angkatanRows = await c.env.DB.prepare(
-    `SELECT DISTINCT angkatan FROM alumni WHERE status_verifikasi = 'verified' AND gender = ? AND angkatan IS NOT NULL AND angkatan != '' ORDER BY angkatan`,
+    `SELECT DISTINCT angkatan FROM alumni WHERE status_verifikasi = 'verified' AND deleted_at IS NULL AND gender = ? AND angkatan IS NOT NULL AND angkatan != '' ORDER BY angkatan`,
   )
     .bind(alumni.gender)
     .all<{ angkatan: string }>();
   const tahunLulusRows = await c.env.DB.prepare(
-    `SELECT DISTINCT tahun_lulus FROM alumni WHERE status_verifikasi = 'verified' AND gender = ? AND tahun_lulus IS NOT NULL ORDER BY tahun_lulus`,
+    `SELECT DISTINCT tahun_lulus FROM alumni WHERE status_verifikasi = 'verified' AND deleted_at IS NULL AND gender = ? AND tahun_lulus IS NOT NULL ORDER BY tahun_lulus`,
   )
     .bind(alumni.gender)
     .all<{ tahun_lulus: number }>();
@@ -668,7 +668,7 @@ alumniRoutes.get("/yearbook", async (c) => {
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "50", 10), 1), 200);
   const offset = (page - 1) * limit;
 
-  let whereSql = "WHERE status_verifikasi = 'verified' AND gender = ?";
+  let whereSql = "WHERE status_verifikasi = 'verified' AND deleted_at IS NULL AND gender = ?";
   const params: (string | number)[] = [alumni.gender];
   if (tahunLulus) { whereSql += " AND tahun_lulus = ?"; params.push(tahunLulus); }
   if (angkatan) { whereSql += " AND angkatan = ?"; params.push(angkatan); }

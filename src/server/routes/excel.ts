@@ -19,7 +19,7 @@ excelRoutes.get("/export/excel", async (c) => {
   const gender = c.req.query("gender");
   const status = c.req.query("status");
 
-  let whereSql = "WHERE 1=1";
+  let whereSql = "WHERE 1=1 AND deleted_at IS NULL";
   const params: (string | number)[] = [];
 
   if (session.role === "admin_putra") {

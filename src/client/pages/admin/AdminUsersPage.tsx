@@ -22,6 +22,12 @@ export function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [newAdmin, setNewAdmin] = useState({ username: "", password: "", namaLengkap: "", role: "admin_putra", assignedGender: "putra", assignedUnit: "" });
+  const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
+  const [editForm, setEditForm] = useState({ namaLengkap: "", role: "admin_putra", assignedGender: "putra", assignedUnit: "" });
+  const [editLoading, setEditLoading] = useState(false);
 
   const fetchAdmins = useCallback(async () => {
     try {
@@ -66,6 +72,58 @@ export function AdminUsersPage() {
     }
   }, [fetchAdmins]);
 
+  const handleResetPassword = useCallback(async () => {
+    if (!resetTarget || !newPassword || newPassword.length < 6) {
+      alert("Password minimal 6 karakter");
+      return;
+    }
+    setResetLoading(true);
+    try {
+      await apiFetch(`/admin/admins/${resetTarget.id}/reset-password`, {
+        method: "POST",
+        auth: true,
+        jsonBody: { password: newPassword },
+      });
+      setResetTarget(null);
+      setNewPassword("");
+      alert("Password berhasil direset");
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "Gagal reset password");
+    } finally {
+      setResetLoading(false);
+    }
+  }, [resetTarget, newPassword]);
+  const openEdit = useCallback((admin: AdminUser) => {
+    setEditTarget(admin);
+    setEditForm({
+      namaLengkap: admin.nama_lengkap,
+      role: admin.role,
+      assignedGender: admin.assigned_gender || "putra",
+      assignedUnit: admin.assigned_unit || "",
+    });
+  }, []);
+
+  const handleEdit = useCallback(async () => {
+    if (!editTarget || !editForm.namaLengkap) {
+      alert("Nama lengkap wajib diisi");
+      return;
+    }
+    setEditLoading(true);
+    try {
+      await apiFetch(`/admin/admins/${editTarget.id}`, {
+        method: "PUT",
+        auth: true,
+        jsonBody: { ...editForm, assignedUnit: editForm.assignedUnit || null },
+      });
+      setEditTarget(null);
+      fetchAdmins();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "Gagal memperbarui admin");
+    } finally {
+      setEditLoading(false);
+    }
+  }, [editTarget, editForm, fetchAdmins]);
+
   if (currentAdmin?.role !== "super_admin") {
     return <div className="p-8"><Card className="p-6 text-center text-slate-500">Hanya Super Admin yang dapat mengelola admin.</Card></div>;
   }
@@ -104,13 +162,14 @@ export function AdminUsersPage() {
                     {a.assigned_gender} / {a.assigned_unit || "all"}
                   </td>
                   <td className="px-4 py-3">
-                    <Badge color={a.is_active ? "green" : "red"}>{a.is_active ? "Aktif" : "Nonaktif"}</Badge>
-                  </td>
-                  <td className="px-4 py-3">
                     <div className="flex gap-2">
                       <button onClick={() => handleToggle(a.id)} className="text-xs text-blue-600 hover:underline">{a.is_active ? "Nonaktifkan" : "Aktifkan"}</button>
+                      <button onClick={() => openEdit(a)} className="text-xs text-blue-600 hover:underline">Edit</button>
                       {a.id !== currentAdmin?.id && (
-                        <button onClick={() => handleDelete(a.id)} className="text-xs text-red-600 hover:underline">Hapus</button>
+                        <>
+                          <button onClick={() => setResetTarget(a)} className="text-xs text-yellow-600 hover:underline">Reset Password</button>
+                          <button onClick={() => handleDelete(a.id)} className="text-xs text-red-600 hover:underline">Hapus</button>
+                        </>
                       )}
                     </div>
                   </td>
@@ -137,6 +196,46 @@ export function AdminUsersPage() {
           </Select>
           <Input label="Assigned Unit (kosongkan untuk all)" value={newAdmin.assignedUnit} onChange={(e) => setNewAdmin((a) => ({ ...a, assignedUnit: e.target.value }))} placeholder="contoh: KMI" />
           <Button onClick={handleCreate} className="w-full">Buat Admin</Button>
+        </div>
+      </Modal>
+
+      {/* Reset password modal */}
+      <Modal open={!!resetTarget} onClose={() => { setResetTarget(null); setNewPassword(""); }} title={`Reset Password — ${resetTarget?.nama_lengkap ?? ""}`}>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">Masukkan password baru untuk <strong>{resetTarget?.username}</strong>.</p>
+          <Input
+            label="Password Baru"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="Minimal 6 karakter"
+          />
+          <div className="flex gap-2">
+            <Button onClick={handleResetPassword} disabled={resetLoading}>
+              {resetLoading ? "Menyimpan..." : "Reset Password"}
+            </Button>
+            <Button variant="ghost" onClick={() => { setResetTarget(null); setNewPassword(""); }}>Batal</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit admin modal */}
+      <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title={`Edit Admin — ${editTarget?.username ?? ""}`}>
+        <div className="space-y-4">
+          <Input label="Nama Lengkap" value={editForm.namaLengkap} onChange={(e) => setEditForm((f) => ({ ...f, namaLengkap: e.target.value }))} />
+          <Select label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
+            {ADMIN_ROLES.map((r) => <option key={r} value={r}>{r.replace("_", " ")}</option>)}
+          </Select>
+          <Select label="Jenis Kelamin" value={editForm.assignedGender} onChange={(e) => setEditForm((f) => ({ ...f, assignedGender: e.target.value }))}>
+            <option value="putra">Putra</option>
+            <option value="putri">Putri</option>
+            <option value="all">All</option>
+          </Select>
+          <Input label="Assigned Unit (kosongkan untuk all)" value={editForm.assignedUnit} onChange={(e) => setEditForm((f) => ({ ...f, assignedUnit: e.target.value }))} placeholder="contoh: KMI" />
+          <div className="flex gap-2">
+            <Button onClick={handleEdit} disabled={editLoading}>{editLoading ? "Menyimpan..." : "Simpan"}</Button>
+            <Button variant="ghost" onClick={() => setEditTarget(null)}>Batal</Button>
+          </div>
         </div>
       </Modal>
     </div>

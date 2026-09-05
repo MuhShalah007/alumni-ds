@@ -5,6 +5,7 @@ import { Pagination } from "../../components/Pagination";
 import { apiFetch, ApiError } from "../../lib/api";
 import { PUTRA_UNITS, PUTRI_UNITS } from "@shared/constants";
 import { TableSkeleton } from "../../components/Skeleton";
+import { useAuth } from "../../hooks/useAuth";
 
 interface AlumniRow {
   id: string;
@@ -30,7 +31,12 @@ interface PaginationData {
 }
 
 export function AlumniListPage() {
+  const { admin: currentAdmin } = useAuth();
+  const [tab, setTab] = useState<"active" | "trash">("active");
   const [data, setData] = useState<AlumniRow[]>([]);
+  const [deletedData, setDeletedData] = useState<AlumniRow[]>([]);
+  const [deletedLoading, setDeletedLoading] = useState(false);
+  const [emptyingTrash, setEmptyingTrash] = useState(false);
   const [pagination, setPagination] = useState<PaginationData>({ page: 1, limit: 50, total: 0, totalPages: 0 });
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ gender: "", angkatan: "", unit: "", status: "", search: "" });
@@ -144,6 +150,44 @@ export function AlumniListPage() {
     }
     setSelected(new Set());
   }, [selected, handleVerify]);
+  const fetchDeleted = useCallback(async () => {
+    setDeletedLoading(true);
+    try {
+      const res = await apiFetch<{ data: (AlumniRow & { deleted_at: string })[] }>("/admin/alumni/deleted", { auth: true });
+      setDeletedData(res.data);
+    } catch {
+      setDeletedData([]);
+    } finally {
+      setDeletedLoading(false);
+    }
+  }, []);
+
+  const handleRestore = useCallback(async (id: string) => {
+    try {
+      await apiFetch(`/admin/alumni/${id}/restore`, { method: "POST", auth: true });
+      fetchDeleted();
+      fetchData();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "Gagal memulihkan");
+    }
+  }, [fetchDeleted, fetchData]);
+
+  const handleEmptyTrash = useCallback(async () => {
+    if (!confirm("Yakin mengosongkan sampah? Data yang dihapus permanen tidak dapat dikembalikan.")) return;
+    setEmptyingTrash(true);
+    try {
+      await apiFetch("/admin/alumni/trash/empty", { method: "DELETE", auth: true });
+      fetchDeleted();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "Gagal mengosongkan sampah");
+    } finally {
+      setEmptyingTrash(false);
+    }
+  }, [fetchDeleted]);
+
+  useEffect(() => {
+    if (tab === "trash") fetchDeleted();
+  }, [tab, fetchDeleted]);
 
   const allUnits = [...PUTRA_UNITS, ...PUTRI_UNITS];
 
@@ -161,6 +205,26 @@ export function AlumniListPage() {
         <span className="text-sm text-slate-500">{pagination.total} total</span>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 mb-4 border-b border-slate-200">
+        <button
+          onClick={() => setTab("active")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === "active" ? "border-[#087348] text-[#087348]" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+        >
+          Data Alumni
+        </button>
+        {currentAdmin?.role === "super_admin" && (
+          <button
+            onClick={() => setTab("trash")}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === "trash" ? "border-[#087348] text-[#087348]" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+          >
+            Sampah {deletedData.length > 0 && <span className="ml-1 px-1.5 py-0.5 text-xs bg-red-100 text-red-600 rounded-full">{deletedData.length}</span>}
+          </button>
+        )}
+      </div>
+
+      {tab === "active" && (
+      <>
       {/* Filters */}
       <Card className="p-4 mb-4">
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -283,6 +347,65 @@ export function AlumniListPage() {
           onLimitChange={(l) => setPagination((prev) => ({ ...prev, limit: l, page: 1 }))}
         />
       </Card>
+      </>
+      )}
+
+      {tab === "trash" && (
+        <Card className="overflow-hidden">
+          {deletedLoading ? (
+            <div className="p-4"><TableSkeleton /></div>
+          ) : deletedData.length === 0 ? (
+            <p className="p-8 text-center text-slate-500">Sampah kosong.</p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between p-4 border-b border-slate-200">
+                <span className="text-sm text-slate-600">{deletedData.length} alumni di sampah</span>
+                <Button variant="danger" size="sm" onClick={handleEmptyTrash} disabled={emptyingTrash}>
+                  {emptyingTrash ? "Mengosongkan..." : "Kosongkan Sampah"}
+                </Button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th className="text-left px-4 py-3 font-medium text-slate-600">Nama</th>
+                      <th className="text-left px-4 py-3 font-medium text-slate-600">Jenis Kelamin</th>
+                      <th className="text-left px-4 py-3 font-medium text-slate-600">Unit/Angkatan</th>
+                      <th className="text-left px-4 py-3 font-medium text-slate-600">No HP</th>
+                      <th className="text-left px-4 py-3 font-medium text-slate-600">Dihapus</th>
+                      <th className="text-left px-4 py-3 font-medium text-slate-600">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {deletedData.map((row) => (
+                      <tr key={row.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {row.foto_url ? <img src={row.foto_url} alt="" className="w-8 h-8 rounded-full object-cover" /> : <div className={`w-8 h-8 rounded-full flex items-center justify-center ${row.gender === "putra" ? "bg-blue-100 text-blue-400" : "bg-pink-100 text-pink-400"}`}><Icons.User size={16} /></div>}
+                            <div>
+                              <p className="font-medium text-slate-800">{row.nama_lengkap}</p>
+                              <p className="text-xs text-slate-400">#{row.id.slice(-8).toUpperCase()}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{row.gender === "putra" ? "Putra" : "Putri"}</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs font-medium">{row.unit}-{row.angkatan} {row.kelas_nihai !== "Tidak Paralel" ? row.kelas_nihai : ""} Th. {row.tahun_lulus}</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{row.no_hp}</td>
+                        <td className="px-4 py-3 text-slate-400 text-xs">{new Date((row as AlumniRow & { deleted_at: string }).deleted_at.replace(" ", "T")).toLocaleString("id-ID", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</td>
+                        <td className="px-4 py-3">
+                          <button onClick={() => handleRestore(row.id)} className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 px-2 py-1 rounded">
+                            <Icons.RefreshCw size={14} /> Pulihkan
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </Card>
+      )}
 
       {/* Detail modal */}
       <Modal open={!!detailAlumni} onClose={() => setDetailAlumni(null)} title="Detail Alumni">

@@ -38,7 +38,7 @@ adminRoutes.get("/alumni", async (c) => {
   const order = c.req.query("order") || "desc";
 
   // Build WHERE clause using raw D1 with scope from alumniScope
-  let whereSql = "WHERE 1=1";
+  let whereSql = "WHERE 1=1 AND deleted_at IS NULL";
   const d1Params: (string | number)[] = [];
 
   if (scope.whereSql) {
@@ -87,6 +87,20 @@ adminRoutes.get("/alumni", async (c) => {
   });
 });
 
+// GET /api/admin/alumni/deleted — list soft-deleted alumni (super_admin only)
+adminRoutes.get("/alumni/deleted", requireSuperAdmin, async (c) => {
+  const rows = await c.env.DB.prepare(
+    "SELECT id, nama_lengkap, nama_panggilan, gender, unit, kelas_nihai, angkatan, tahun_lulus, no_hp, status_verifikasi, foto_url, created_at, deleted_at FROM alumni WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+  ).all();
+  return c.json({ data: rows.results });
+});
+
+// DELETE /api/admin/alumni/trash/empty — permanently delete all soft-deleted
+adminRoutes.delete("/alumni/trash/empty", requireSuperAdmin, async (c) => {
+  const result = await c.env.DB.prepare("DELETE FROM alumni WHERE deleted_at IS NOT NULL").run();
+  return c.json({ success: true, message: "Sampah dikosongkan", count: result.meta?.changes ?? 0 });
+});
+
 // GET /api/admin/alumni/:id — detail
 adminRoutes.get("/alumni/:id", async (c) => {
   const id = c.req.param("id");
@@ -97,7 +111,7 @@ adminRoutes.get("/alumni/:id", async (c) => {
   if (!accessCheck) return c.json({ error: "Alumni tidak ditemukan atau di luar scope" }, 404);
 
   const row = await c.env.DB.prepare(
-    "SELECT a.id, a.nama_lengkap, a.nama_pondok, a.nama_panggilan, a.tempat_lahir, a.tanggal_lahir, a.gender, a.unit, a.kelas_nihai, a.angkatan, a.tahun_lulus, a.tahun_masuk, a.nama_angkatan, a.alamat, a.no_hp, a.email, a.motto, a.kesan_pesan, a.momen_berkesan, a.foto_url, a.background_url, a.sosial_media, a.status_aktivitas, a.detail_aktivitas, a.privacy_level, a.photo_privacy, a.status_verifikasi, a.verified_by, a.verified_at, a.created_at, a.updated_at, adm.nama_lengkap as verified_by_name FROM alumni a LEFT JOIN admins adm ON a.verified_by = adm.id WHERE a.id = ?"
+    "SELECT a.id, a.nama_lengkap, a.nama_pondok, a.nama_panggilan, a.tempat_lahir, a.tanggal_lahir, a.gender, a.unit, a.kelas_nihai, a.angkatan, a.tahun_lulus, a.tahun_masuk, a.nama_angkatan, a.alamat, a.no_hp, a.email, a.motto, a.kesan_pesan, a.momen_berkesan, a.foto_url, a.background_url, a.sosial_media, a.status_aktivitas, a.detail_ativitas, a.privacy_level, a.photo_privacy, a.status_verifikasi, a.verified_by, a.verified_at, a.created_at, a.updated_at, adm.nama_lengkap as verified_by_name FROM alumni a LEFT JOIN admins adm ON a.verified_by = adm.id WHERE a.id = ? AND a.deleted_at IS NULL"
   )
     .bind(id)
     .first();
@@ -185,21 +199,33 @@ adminRoutes.put("/alumni/:id", async (c) => {
   return c.json({ success: true, message: "Data alumni diperbarui" });
 });
 
-// DELETE /api/admin/alumni/:id
+// DELETE /api/admin/alumni/:id — soft delete (move to trash)
 adminRoutes.delete("/alumni/:id", async (c) => {
   const id = c.req.param("id");
   const session = c.get("admin")!;
 
   const accessCheck = await fetchScopedAlumni(c.env.DB, session, id);
-  if (!accessCheck) return c.json({ error: "Alumni di luar scope Anda" }, 403);
+  if (!accessCheck) return c.json({ error: "Alumni tidak ditemukan atau di luar scope" }, 404);
 
-  await c.env.DB.prepare("DELETE FROM alumni WHERE id = ?").bind(id).run();
-
-  await c.env.DB.prepare("INSERT INTO activity_logs (id, admin_id, action, details) VALUES (?, ?, ?, ?)")
-    .bind(ulid(), session.adminId, "DELETE_ALUMNI", JSON.stringify({ alumniId: id }))
+  await c.env.DB.prepare("UPDATE alumni SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(id)
     .run();
 
-  return c.json({ success: true, message: "Data alumni dihapus" });
+  await c.env.DB.prepare("INSERT INTO activity_logs (id, admin_id, alumni_id, action, details) VALUES (?, ?, ?, ?, ?)")
+    .bind(ulid(), session.adminId, id, "DELETE_ALUMNI", JSON.stringify({ softDelete: true }))
+    .run();
+
+  return c.json({ success: true, message: "Alumni dipindahkan ke sampah" });
+});
+
+// POST /api/admin/alumni/:id/restore — restore soft-deleted alumni
+adminRoutes.post("/alumni/:id/restore", requireSuperAdmin, async (c) => {
+  const id = c.req.param("id");
+  const existing = await c.env.DB.prepare("SELECT deleted_at FROM alumni WHERE id = ?").bind(id).first<{ deleted_at: string | null }>();
+  if (!existing) return c.json({ error: "Alumni tidak ditemukan" }, 404);
+  if (!existing.deleted_at) return c.json({ error: "Alumni tidak ada di sampah" }, 400);
+  await c.env.DB.prepare("UPDATE alumni SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id).run();
+  return c.json({ success: true, message: "Alumni berhasil dipulihkan" });
 });
 
 // PATCH /api/admin/alumni/:id/verify — verify or reject
@@ -242,7 +268,7 @@ adminRoutes.get("/stats", async (c) => {
   const session = c.get("admin")!;
   const scope = alumniScope(session);
 
-  let whereSql = "WHERE 1=1";
+  let whereSql = "WHERE 1=1 AND deleted_at IS NULL";
   const params: string[] = [];
   if (session.role === "admin_putra") {
     whereSql += " AND gender = 'putra'";
@@ -292,7 +318,7 @@ adminRoutes.get("/yearbook-data", async (c) => {
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "50", 10), 1), 200);
   const offset = (page - 1) * limit;
 
-  let whereSql = "WHERE status_verifikasi = 'verified'";
+  let whereSql = "WHERE status_verifikasi = 'verified' AND deleted_at IS NULL";
   const params: (string | number)[] = [];
 
   if (session.role === "admin_putra") {
@@ -346,7 +372,7 @@ adminRoutes.get("/yearbook-data", async (c) => {
 adminRoutes.get("/angkatan-list", async (c) => {
   const session = c.get("admin")!;
 
-  let whereSql = "WHERE status_verifikasi = 'verified'";
+  let whereSql = "WHERE status_verifikasi = 'verified' AND deleted_at IS NULL";
   const params: (string | number)[] = [];
   if (session.role === "admin_putra") {
     whereSql += " AND gender = 'putra'";
@@ -382,6 +408,7 @@ adminRoutes.get("/admins", requireSuperAdmin, async (c) => {
   return c.json({ data: rows.results });
 });
 
+
 adminRoutes.post("/admins", requireSuperAdmin, async (c) => {
   const body = await c.req.json();
   const parsed = createAdminSchema.safeParse(body);
@@ -413,7 +440,7 @@ adminRoutes.delete("/admins/:id", requireSuperAdmin, async (c) => {
   if (id === session.adminId) return c.json({ error: "Tidak dapat menghapus diri sendiri" }, 400);
 
   await c.env.DB.prepare("DELETE FROM admins WHERE id = ?").bind(id).run();
-  return c.json({ success: true, message: "Admin dihapus" });
+  return c.json({ success: true, message: "Admin berhasil dihapus" });
 });
 
 adminRoutes.patch("/admins/:id/toggle", requireSuperAdmin, async (c) => {
@@ -428,6 +455,56 @@ adminRoutes.patch("/admins/:id/toggle", requireSuperAdmin, async (c) => {
 
   return c.json({ success: true, isActive: !!newStatus });
 });
+
+adminRoutes.post("/admins/:id/reset-password", requireSuperAdmin, async (c) => {
+  const id = c.req.param("id");
+  const { password } = await c.req.json<{ password: string }>();
+
+  if (!password || password.length < 6) {
+    return c.json({ error: "Password minimal 6 karakter" }, 400);
+  }
+
+  const existing = await c.env.DB.prepare("SELECT id FROM admins WHERE id = ? AND deleted_at IS NULL").bind(id).first();
+  if (!existing) return c.json({ error: "Admin tidak ditemukan" }, 404);
+
+  const passwordHash = await hashPassword(password);
+  await c.env.DB.prepare("UPDATE admins SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(passwordHash, id)
+    .run();
+
+  return c.json({ success: true, message: "Password berhasil direset" });
+});
+
+// PUT /api/admin/admins/:id — edit admin (super_admin only)
+adminRoutes.put("/admins/:id", requireSuperAdmin, async (c) => {
+  const id = c.req.param("id");
+  const { namaLengkap, role, assignedGender, assignedUnit } = await c.req.json<{
+    namaLengkap: string;
+    role: string;
+    assignedGender: string;
+    assignedUnit: string | null;
+  }>();
+
+  if (!namaLengkap || !role) {
+    return c.json({ error: "Nama dan role wajib diisi" }, 400);
+  }
+
+  if (!["super_admin", "admin_putra", "admin_putri", "admin_unit"].includes(role)) {
+    return c.json({ error: "Role tidak valid" }, 400);
+  }
+
+  const existing = await c.env.DB.prepare("SELECT id FROM admins WHERE id = ?").bind(id).first();
+  if (!existing) return c.json({ error: "Admin tidak ditemukan" }, 404);
+
+  await c.env.DB.prepare(
+    "UPDATE admins SET nama_lengkap = ?, role = ?, assigned_gender = ?, assigned_unit = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+  )
+    .bind(namaLengkap, role, assignedGender, assignedUnit ?? null, id)
+    .run();
+
+  return c.json({ success: true, message: "Admin berhasil diperbarui" });
+});
+
 
 // POST /api/admin/alumni/:id/generate-edit-link — generate/regenerate edit link with optional expiry
 adminRoutes.post("/alumni/:id/generate-edit-link", async (c) => {

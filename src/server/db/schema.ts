@@ -13,6 +13,7 @@ export const admins = sqliteTable("admins", {
   isActive: integer("is_active").notNull().default(1),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text("deleted_at"),
 });
 
 // 2. Alumni
@@ -54,7 +55,7 @@ export const alumni = sqliteTable(
     verifiedBy: text("verified_by").references(() => admins.id),
     verifiedAt: text("verified_at"),
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    deletedAt: text("deleted_at"),
   },
   (t) => ({
     noHpIdx: uniqueIndex("idx_alumni_no_hp").on(t.noHp),

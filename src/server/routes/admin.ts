@@ -464,7 +464,7 @@ adminRoutes.post("/admins/:id/reset-password", requireSuperAdmin, async (c) => {
     return c.json({ error: "Password minimal 6 karakter" }, 400);
   }
 
-  const existing = await c.env.DB.prepare("SELECT id FROM admins WHERE id = ? AND deleted_at IS NULL").bind(id).first();
+  const existing = await c.env.DB.prepare("SELECT id FROM admins WHERE id = ?").bind(id).first();
   if (!existing) return c.json({ error: "Admin tidak ditemukan" }, 404);
 
   const passwordHash = await hashPassword(password);

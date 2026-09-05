@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button, Input, Select, Card, Badge, Modal } from "../../components/ui";
+import { Icon, Icons } from "../../components/Icon";
 import { apiFetch, ApiError } from "../../lib/api";
 import { useAuth } from "../../hooks/useAuth";
 import { ADMIN_ROLES } from "@shared/constants";
@@ -162,13 +163,21 @@ export function AdminUsersPage() {
                     {a.assigned_gender} / {a.assigned_unit || "all"}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-2">
-                      <button onClick={() => handleToggle(a.id)} className="text-xs text-blue-600 hover:underline">{a.is_active ? "Nonaktifkan" : "Aktifkan"}</button>
-                      <button onClick={() => openEdit(a)} className="text-xs text-blue-600 hover:underline">Edit</button>
+                    <div className="flex gap-1.5 items-center">
+                      <button onClick={() => handleToggle(a.id)} title={a.is_active ? "Nonaktifkan" : "Aktifkan"} className={`p-1.5 rounded ${a.is_active ? "text-blue-600 hover:bg-blue-50" : "text-green-600 hover:bg-green-50"}`}>
+                        <Icon name={a.is_active ? "forbid-line" : "check-line"} size={16} />
+                      </button>
+                      <button onClick={() => openEdit(a)} title="Edit" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
+                        <Icons.Edit size={16} />
+                      </button>
                       {a.id !== currentAdmin?.id && (
                         <>
-                          <button onClick={() => setResetTarget(a)} className="text-xs text-yellow-600 hover:underline">Reset Password</button>
-                          <button onClick={() => handleDelete(a.id)} className="text-xs text-red-600 hover:underline">Hapus</button>
+                          <button onClick={() => setResetTarget(a)} title="Reset Password" className="p-1.5 text-yellow-600 hover:bg-yellow-50 rounded">
+                            <Icons.Lock size={16} />
+                          </button>
+                          <button onClick={() => handleDelete(a.id)} title="Hapus" className="p-1.5 text-red-600 hover:bg-red-50 rounded">
+                            <Icons.Trash size={16} />
+                          </button>
                         </>
                       )}
                     </div>

@@ -305,29 +305,33 @@ export function AlumniListPage() {
                       </Badge>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-1.5 items-center flex-wrap">
-                        <button onClick={() => handleViewDetail(row.id)} className="text-xs text-blue-600 hover:underline">Lihat</button>
+                      <div className="flex gap-1.5 items-center">
+                        <button onClick={() => handleViewDetail(row.id)} title="Lihat Detail" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
+                          <Icons.Eye size={16} />
+                        </button>
                         {row.status_verifikasi === "pending" && (
                           <>
-                            <button onClick={() => handleVerify(row.id, "verified")} className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 px-2 py-1 rounded" title="Verifikasi">
-                              <Icons.Check size={14} /> Verifikasi
+                            <button onClick={() => handleVerify(row.id, "verified")} title="Verifikasi" className="p-1.5 text-green-700 bg-green-50 hover:bg-green-100 rounded">
+                              <Icons.Check size={16} />
                             </button>
-                            <button onClick={() => handleVerify(row.id, "rejected")} className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded" title="Tolak">
-                              <Icons.Close size={14} /> Tolak
+                            <button onClick={() => handleVerify(row.id, "rejected")} title="Tolak" className="p-1.5 text-red-700 bg-red-50 hover:bg-red-100 rounded">
+                              <Icons.Close size={16} />
                             </button>
                           </>
                         )}
                         {row.status_verifikasi === "verified" && (
-                          <button onClick={() => handleVerify(row.id, "pending")} className="inline-flex items-center gap-1 text-xs font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 px-2 py-1 rounded" title="Batal Verifikasi">
-                            Batal Verifikasi
+                          <button onClick={() => handleVerify(row.id, "pending")} title="Batal Verifikasi" className="p-1.5 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded">
+                            <Icons.Warning size={16} />
                           </button>
                         )}
                         {row.status_verifikasi === "rejected" && (
-                          <button onClick={() => handleVerify(row.id, "verified")} className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 px-2 py-1 rounded" title="Verifikasi">
-                            <Icons.Check size={14} /> Verifikasi
+                          <button onClick={() => handleVerify(row.id, "verified")} title="Verifikasi" className="p-1.5 text-green-700 bg-green-50 hover:bg-green-100 rounded">
+                            <Icons.Check size={16} />
                           </button>
                         )}
-                        <button onClick={() => handleDelete(row.id)} className="text-xs text-red-600 hover:underline">Hapus</button>
+                        <button onClick={() => handleDelete(row.id)} title="Hapus" className="p-1.5 text-red-600 hover:bg-red-50 rounded">
+                          <Icons.Trash size={16} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -393,8 +397,8 @@ export function AlumniListPage() {
                         <td className="px-4 py-3 text-slate-600 text-xs">{row.no_hp}</td>
                         <td className="px-4 py-3 text-slate-400 text-xs">{new Date((row as AlumniRow & { deleted_at: string }).deleted_at.replace(" ", "T")).toLocaleString("id-ID", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</td>
                         <td className="px-4 py-3">
-                          <button onClick={() => handleRestore(row.id)} className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 px-2 py-1 rounded">
-                            <Icons.RefreshCw size={14} /> Pulihkan
+                          <button onClick={() => handleRestore(row.id)} title="Pulihkan" className="p-1.5 text-green-700 bg-green-50 hover:bg-green-100 rounded">
+                            <Icons.RefreshCw size={16} />
                           </button>
                         </td>
                       </tr>
